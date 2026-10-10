@@ -7,6 +7,9 @@
 - 真实 rclone 1.75.1 与隔离 WebDAV 协议夹具验证中文、空格、百分号根目录，以及原文冒号文件名；完成后台扫描、清单复用、视频字幕复制、Google group 预算切换、只读目标和创建目录拒绝、连接名称冲突、普通编辑接口拒绝、修改根目录后的旧扫描失效、重启和完整加密恢复。group 成员使用本地后端及模拟身份验证上传内容与切换流程。
 - 本机完整测试 172 项：171 项通过，0 项失败，1 项需要独立 OpenList 的实机检查跳过。
 - Chrome 桌面 1280 × 900 / 手机 390 × 844 验证专用入口、401 提示、保存前测试、表单内边距与手机无横向溢出、默认 CD2 / group 选择、只读目标排除、真实网页后台扫描并复制 3 个文件到第二个 group 成员、编辑时密码不回显且保留后可测试、禁止创建目录，以及 115 表单转到 CD2 的入口；前端无异常。生产构建、格式和两份 Compose 校验通过。
+- AMD64 / ARM64 最终生产镜像各运行同一套 172 项测试：171 项通过、1 项独立 OpenList 检查跳过；在无外网、只读根目录、UID 1000 下验证，版本、rclone 1.75.1、本地二维码及 CD2 生产页面检查均通过。
+- 应用提交 `7c701fb95bf7b768bca0afa993cd119859fc4dce` 与 `v1.0.6` 已推送；[main CI](https://github.com/qwer8856/cloudreel/actions/runs/38089305848) 和 [标签 CI](https://github.com/qwer8856/cloudreel/actions/runs/38089361709) 均成功。Docker Hub `1.0.6` / `latest` 同为 `sha256:c068acf9b780bac297ed9c1c5ea523f647eba85df39ce13bdcaa9cd9fdd92e3c`，与已测试候选镜像一致，匿名查询两标签均 HTTP 200。使用 `skopeo --src-no-creds --all --preserve-digests` 实际匿名拉取两架构完整镜像，索引、平台清单、22 个 blob 的 SHA256、层大小、版本及源码提交均匹配。
+- [GitHub Release v1.0.6](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.6) 已公开，源码、部署模板、AMD64 / ARM64 离线镜像与 SHA256SUMS 共 5 个附件；远端大小及 SHA256 全部匹配，匿名 API 查询确认可见。
 - 尚未使用用户真实 CD2、115 或 Google 账号进行端到端传输；不据此承诺真实网盘速度或已消除上游限流。
 
 ## CloudReel 1.0.5 等待进度与任务按钮间距（2026-10-11）
