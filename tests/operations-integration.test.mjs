@@ -269,18 +269,23 @@ test(
           maxJobs: 2,
           groupId: group.id,
         });
-        const first = await call('/jobs', 'POST', input('quota-src', 'quota-target'));
-        const second = await call('/jobs', 'POST', input('src', 'quota-second'));
-        assert.equal(second.status, 'queued');
-        await finish(first.id, 'waiting_quota');
-        assert.equal((await call('/operations')).groups[0].today.bytes, 80 * 1024);
-        assert.equal((await call(`/jobs/${second.id}`)).status, 'waiting_quota');
-        now += 86400000;
-        await finish(first.id);
-        await finish(second.id);
-        assert.equal((await readdir(path.join(root, 'quota-target'))).length, 3);
-        assert.ok((await call('/operations')).groups[0].today.bytes < 70 * 1024);
-        await call('/accounts/local', 'PUT', { label: '本地', maxJobs: 2, groupId: '' });
+        try {
+          const first = await call('/jobs', 'POST', input('quota-src', 'quota-target'));
+          const second = await call('/jobs', 'POST', input('src', 'quota-second'));
+          // The first copy can exhaust its budget before the second request arrives.
+          assert.ok(['queued', 'waiting_quota'].includes(second.status), JSON.stringify(second));
+          assert.equal(second.attempts, 0);
+          await finish(first.id, 'waiting_quota');
+          assert.equal((await call('/operations')).groups[0].today.bytes, 80 * 1024);
+          assert.equal((await call(`/jobs/${second.id}`)).status, 'waiting_quota');
+          now += 86400000;
+          await finish(first.id);
+          await finish(second.id);
+          assert.equal((await readdir(path.join(root, 'quota-target'))).length, 3);
+          assert.ok((await call('/operations')).groups[0].today.bytes < 70 * 1024);
+        } finally {
+          await call('/accounts/local', 'PUT', { label: '本地', maxJobs: 2, groupId: '' });
+        }
       });
       await t.test('同一种网盘的两个账号拥有不同挂载和凭据，删除不会影响另一账号', async () => {
         await call('/openlist', 'PUT', {

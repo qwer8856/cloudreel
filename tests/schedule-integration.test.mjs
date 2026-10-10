@@ -246,7 +246,11 @@ test(
           (item) => item.scheduleId === created.data.id && item.status === 'running',
         );
         assert.ok(active, JSON.stringify((await call('/schedules')).data));
-        assert.notEqual(active.id, started.data.id);
+        // A slow shutdown can persist the interrupted job and resume it on startup.
+        assert.ok(
+          active.id !== started.data.id || active.attempts > started.data.attempts,
+          JSON.stringify(active),
+        );
         assert.equal(active.limits.bytes, 1024 ** 2 - restored.today.bytes);
         assert.ok(active.limits.seconds < 30);
         await call(`/schedules/${created.data.id}/toggle`, 'POST', { enabled: false });
