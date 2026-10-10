@@ -71,7 +71,7 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 ## Linux / Docker 部署
 
-默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker 发布目标为 `linux/amd64` 与 `linux/arm64`，本版发布标签为 `gongjuren8856/cloudreel:1.0.1`，最新版标签为 `gongjuren8856/cloudreel:latest`。本版镜像尚未发布时，请使用下方的源码构建命令。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.1`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
 取得部署配置并准备数据目录：
 
@@ -135,6 +135,15 @@ OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内
 ### 升级与自行构建
 
 升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
+
+[v1.0.1 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.1) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+docker load -i cloudreel-1.0.1-linux-amd64.tar.gz
+# ARM64 服务器将上面的文件名换成 cloudreel-1.0.1-linux-arm64.tar.gz
+docker compose up -d --pull never
+```
 
 旧 Compose 自带 OpenList 时，已有的 115、光鸭、123 连接仍需要它。切换模板前需保留或独立部署该服务及原数据目录；不要用 `--remove-orphans` 清理仍在使用的 OpenList。独立部署后，在网页更新地址和授权。已有国内网盘连接时需先停止相关任务、停用计划；更换服务地址还需先导出备份并移除连接，按“备份、恢复与迁移”恢复到目标服务。
 
