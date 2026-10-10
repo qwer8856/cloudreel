@@ -240,11 +240,28 @@ export class MediaRunner {
     );
     const active = job.files[job.mediaIndex];
     if (active?.status === 'running') {
-      active.bytes = Math.min(
-        active.size,
-        (stats.transferring || []).reduce((sum, item) => sum + (Number(item.bytes) || 0), 0),
+      const now = Date.now();
+      const transfers = stats.transferring || [];
+      const bytes = transfers.length
+        ? Math.min(
+            active.size,
+            transfers.reduce((sum, item) => sum + (Number(item.bytes) || 0), 0),
+          )
+        : active.bytes || 0;
+      active.startedAt ||= new Date(now).toISOString();
+      active.lastProgressAt ||= active.startedAt;
+      if (bytes !== active.bytes) active.lastProgressAt = new Date(now).toISOString();
+      active.bytes = bytes;
+      active.speed = transfers.reduce(
+        (sum, item) => sum + (Number(item.speedAvg ?? item.speed) || 0),
+        0,
       );
-      active.speed = Number(stats.speed) || 0;
+      active.progressPhase =
+        active.bytes >= active.size ? 'finishing' : active.bytes ? 'transferring' : 'waiting';
+      active.idleSeconds = Math.max(
+        0,
+        Math.floor((now - Date.parse(active.lastProgressAt)) / 1000),
+      );
     }
     return {
       bytes: Number(stats.bytes) || 0,
@@ -260,6 +277,10 @@ export class MediaRunner {
         complete.reduce((sum, file) => sum + file.size, 0) +
         (active?.status === 'running' ? active.bytes : 0),
       eta: stats.eta ?? null,
+      errors: stats.errors,
+      lastError: stats.lastError,
+      retryError: stats.retryError,
+      fatalError: stats.fatalError,
     };
   }
 
@@ -296,7 +317,11 @@ export class MediaRunner {
       return { status: ended(false, job.mediaPreparationError), stats: this.summarize(job, stats) };
     if (job.jobId !== null && job.jobId !== undefined) {
       const status = await this.engine.call('job/status', { jobid: job.jobId });
-      if (!status.finished) return { status, stats: this.summarize(job, stats) };
+      if (!status.finished) {
+        const file = job.files[job.mediaIndex];
+        if (file && status.startTime) file.startedAt ||= status.startTime;
+        return { status, stats: this.summarize(job, stats) };
+      }
       stats = await this.engine.call('core/stats', { group: job.group });
       const file = job.files[job.mediaIndex];
       if (file) {
@@ -440,6 +465,10 @@ export class MediaRunner {
         file.status = 'running';
         file.bytes = 0;
         file.error = '';
+        file.reason = '';
+        delete file.rawError;
+        file.startedAt = new Date().toISOString();
+        file.lastProgressAt = file.startedAt;
         job.jobId = result.jobid;
         job.currentFile = file.path;
         return { status: { finished: false }, stats: this.summarize(job, stats) };

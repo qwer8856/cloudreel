@@ -378,6 +378,60 @@ test(
         await call('/remotes/115-second', 'DELETE', {});
         assert.equal((await call('/cloud-remotes/115-main')).phase, 'ready');
       });
+      await t.test('运行中的任务保留分组请求错误并去重，进度更新失败可见且能恢复', async () => {
+        const original = panel.engine.call.bind(panel.engine);
+        let finished = false,
+          unavailable = false;
+        const token = 'b'.repeat(48);
+        const message = `failed to open source object: Get "http://127.0.0.1:12345/${token}/115/字幕.srt": 115 下载地址接口返回 HTTP 503。`;
+        panel.engine.call = async (endpoint, args = {}, ...rest) => {
+          if (endpoint === 'sync/copy') return { jobid: 99001 };
+          if (endpoint === 'job/status' && args.jobid === 99001)
+            return { finished, success: finished, endTime: new Date().toISOString() };
+          if (endpoint === 'core/stats' && args.group?.startsWith('studio/')) {
+            if (unavailable) throw new Error('无法连接 rclone 服务。');
+            return { bytes: 0, errors: 2, lastError: message, retryError: true };
+          }
+          if (endpoint === 'core/stats' && !args.group)
+            return { bytes: 0, lastError: '另一个任务的错误；UID=synthetic-global-secret' };
+          if (endpoint === 'core/transferred' && args.group?.startsWith('studio/'))
+            return { transferred: [] };
+          return original(endpoint, args, ...rest);
+        };
+        try {
+          const job = await call('/jobs', 'POST', input('src', 'diagnostics-target'));
+          await panel.tick();
+          await panel.tick();
+          const running = await call(`/jobs/${job.id}`);
+          assert.equal(running.status, 'running');
+          assert.equal(running.stats.errors, 2);
+          assert.equal(running.stats.retryError, true);
+          assert.match(running.stats.lastError, /下载地址接口.*503/);
+          assert.equal(
+            running.events.filter((event) => event.message.startsWith('本次执行最近请求错误'))
+              .length,
+            1,
+          );
+          assert.equal(JSON.stringify(running).includes(token), false);
+          assert.equal(running.files.length, 0);
+          assert.doesNotMatch(running.stats.lastError, /另一个任务/);
+          assert.equal(
+            JSON.stringify(await call('/status')).includes('synthetic-global-secret'),
+            false,
+          );
+          unavailable = true;
+          await panel.tick();
+          assert.match((await call(`/jobs/${job.id}`)).pollError, /无法连接/);
+          unavailable = false;
+          await panel.tick();
+          assert.equal((await call(`/jobs/${job.id}`)).pollError, undefined);
+        } finally {
+          unavailable = false;
+          finished = true;
+          await panel.tick();
+          panel.engine.call = original;
+        }
+      });
       await t.test('限流按退避重试，永久失败只重试已记录失败文件', async () => {
         const original = panel.engine.call.bind(panel.engine);
         let executions = 0;

@@ -178,6 +178,11 @@
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.transfer-idle {
+  margin: 4px 0 0;
+  color: #785919;
+  font-size: 11px;
+}
 .transfer-diagnostic summary {
   cursor: pointer;
   color: #587568;

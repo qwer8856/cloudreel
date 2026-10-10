@@ -573,6 +573,25 @@ export class Operations {
     }
     job.sharedAccountedBytes = current;
   }
+  diagnostics(job, stats) {
+    const diagnostics = {
+      errors: Math.max(0, Number(stats.errors) || 0),
+      lastError: safeError(stats.lastError || ''),
+      retryError: Boolean(stats.retryError),
+      fatalError: Boolean(stats.fatalError),
+    };
+    // Stats belong to this execution's group, not necessarily the current file.
+    const key = `${job.attempts}:${diagnostics.errors}:${diagnostics.lastError}`;
+    if (
+      diagnostics.lastError &&
+      !wasCancelled(diagnostics.lastError, job) &&
+      job.lastDiagnosticKey !== key
+    ) {
+      this.event(job, `本次执行最近请求错误：${diagnostics.lastError}`);
+      job.lastDiagnosticKey = key;
+    }
+    return diagnostics;
+  }
   async details(job) {
     const data = await this.engine.call('core/transferred', { group: job.group });
     const seen = new Set(job.files.map((file) => file.key));

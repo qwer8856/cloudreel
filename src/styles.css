@@ -1321,6 +1321,16 @@ tr:last-child td {
 .job-table td:nth-child(3) {
   min-width: 160px;
 }
+.job-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  width: max-content;
+}
+.job-actions > .text-button {
+  min-height: 36px;
+  padding: 8px;
+}
 .job-name {
   display: flex;
   align-items: flex-start;

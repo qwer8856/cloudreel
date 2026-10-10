@@ -165,20 +165,22 @@ export function JobTable({ jobs, onStop, onDetails, compact = false }) {
                 </td>
                 {!compact && <td className="muted nowrap">{time(job.createdAt)}</td>}
                 <td>
-                  {onDetails && (
-                    <button className="text-button" onClick={() => onDetails(job)}>
-                      详情
-                    </button>
-                  )}
-                  {job.status === 'running' && (
-                    <button
-                      className="text-button danger"
-                      disabled={job.stopping}
-                      onClick={() => onStop(job)}
-                    >
-                      {job.stopping ? '停止中' : '停止'}
-                    </button>
-                  )}
+                  <div className="job-actions">
+                    {onDetails && (
+                      <button className="text-button" onClick={() => onDetails(job)}>
+                        详情
+                      </button>
+                    )}
+                    {job.status === 'running' && (
+                      <button
+                        className="text-button danger"
+                        disabled={job.stopping}
+                        onClick={() => onStop(job)}
+                      >
+                        {job.stopping ? '停止中' : '停止'}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );

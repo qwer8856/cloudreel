@@ -129,6 +129,57 @@ function queuedJob() {
   };
 }
 
+test('零字节等待与无进展可见，恢复数据后清除计时，等待确认时不丢已传字节', async (t) => {
+  let now = Date.parse('2026-10-11T01:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const job = queuedJob();
+  job.jobId = 7;
+  job.files[0].status = 'running';
+  let stats = {
+    bytes: 0,
+    errors: 1,
+    lastError: '115 下载地址接口返回 HTTP 503。',
+    retryError: true,
+  };
+  const runner = new MediaRunner({
+    engine: {
+      call: async (route) =>
+        route === 'core/stats' ? stats : { finished: false, startTime: '2026-10-11T01:00:00Z' },
+    },
+  });
+  await runner.poll(job);
+  now += 180000;
+  const waiting = await runner.poll(job);
+  assert.equal(waiting.status.finished, false);
+  assert.equal(waiting.stats.lastError, stats.lastError);
+  assert.equal(waiting.stats.retryError, true);
+  assert.equal(job.files[0].progressPhase, 'waiting');
+  assert.equal(job.files[0].idleSeconds, 180);
+  assert.equal(job.files[0].error, undefined);
+
+  stats = { bytes: 30, transferring: [{ bytes: 30, speedAvg: 10 }] };
+  await runner.poll(job);
+  assert.equal(job.files[0].progressPhase, 'transferring');
+  assert.equal(job.files[0].idleSeconds, 0);
+  assert.equal(job.files[0].speed, 10);
+  now += 90000;
+  await runner.poll(job);
+  assert.equal(job.files[0].idleSeconds, 90);
+
+  // A retry can restart the file at zero; it is still running, not a final failure.
+  stats = { bytes: 30, transferring: [{ bytes: 0, speed: 0 }] };
+  await runner.poll(job);
+  assert.equal(job.files[0].progressPhase, 'waiting');
+  assert.equal(job.files[0].idleSeconds, 0);
+  stats = { bytes: 130, transferring: [{ bytes: 100 }] };
+  await runner.poll(job);
+  stats = { bytes: 130 };
+  await runner.poll(job);
+  assert.equal(job.files[0].progressPhase, 'finishing');
+  assert.equal(job.files[0].bytes, 100);
+  assert.equal(job.files[0].speed, 0);
+});
+
 test('copy前目标认证或网络检查错误结束当前尝试并保留失败文件映射', async () => {
   for (const message of ['401 unauthorized', 'connection timeout']) {
     const job = queuedJob();

@@ -675,7 +675,7 @@ export async function createPanel(options = {}) {
       uptime: Math.floor(process.uptime()),
       localRoot,
       configPath: config,
-      stats,
+      stats: stats && { ...stats, lastError: safeError(stats.lastError || '') },
     });
   });
   app.get('/api/providers', async (req, res) => {
@@ -1485,6 +1485,7 @@ export async function createPanel(options = {}) {
           transfers: stats.transfers,
           totalTransfers: stats.totalTransfers,
           eta: stats.eta,
+          ...operations.diagnostics(job, stats),
           ...(mediaEnabled(job)
             ? {
                 completedBytes: stats.completedBytes,

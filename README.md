@@ -1,4 +1,4 @@
-# CloudReel 1.0.4 · 115 → Google Drive 影视传输助手
+# CloudReel 1.0.5 · 115 → Google Drive 影视传输助手
 
 [GitHub 仓库](https://github.com/qwer8856/cloudreel) · [Docker Hub 镜像](https://hub.docker.com/r/gongjuren8856/cloudreel)
 
@@ -41,6 +41,8 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 ### 停止与下载失败原因
 
 点击停止或暂停后，当前请求会取消，任务详情显示用户操作原因，`context canceled` 保存在可展开的技术记录中；已完成文件保留。停止前真实失败的文件仍显示失败，可以只重试失败文件或恢复整个任务。
+
+影视任务交给传输引擎后，尚无文件字节时显示“等待连接 / 读取”，文件字节达到大小但操作尚未结束时显示“等待完成确认”。连续 60 秒没有字节进展会提示等待时长，不因此自动判定失败。运行期间显示本次执行的最近请求错误并写入执行记录，错误是任务范围的记录，不一定属于当前文件；进度更新失败时会提示当前数据可能不是最新值。长时间停留在 0 B 时请结合这些记录检查来源读取、目标上传或网络连接，不能仅按文件大小判断是否能传输。
 
 115 直接连接的失败提示区分目录列表、取得下载地址和文件下载阶段，并显示接口 HTTP 状态、115 错误码及返回说明、DNS / 连接错误或请求超过 20 秒。旧版本的统一 502 提示没有保存底层原因，更新后重试才能取得新的具体记录。诊断输出隐藏 Cookie 和内部读取凭据。
 
@@ -85,7 +87,7 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 ## Linux / Docker 部署
 
-默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.4`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.5`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
 取得部署配置并准备数据目录：
 
@@ -102,7 +104,7 @@ sudo chmod 700 data/config data/panel
 ```yaml
 services:
   cloudreel:
-    image: gongjuren8856/cloudreel:1.0.4
+    image: gongjuren8856/cloudreel:1.0.5
     container_name: cloudreel
     restart: unless-stopped
     init: true
@@ -150,12 +152,12 @@ OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内
 
 升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
 
-[v1.0.4 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.4) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
+[v1.0.5 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.5) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-docker load -i cloudreel-1.0.4-linux-amd64.tar.gz
-# ARM64 服务器将上面的文件名换成 cloudreel-1.0.4-linux-arm64.tar.gz
+docker load -i cloudreel-1.0.5-linux-amd64.tar.gz
+# ARM64 服务器将上面的文件名换成 cloudreel-1.0.5-linux-arm64.tar.gz
 docker compose up -d --pull never
 ```
 

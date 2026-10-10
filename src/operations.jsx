@@ -492,6 +492,18 @@ function JobDetails({ id, onClose, notify, refresh }) {
               </p>
             )}
             {job.error && <p className="form-error">{job.error}</p>}
+            {job.status === 'running' && job.pollError && (
+              <p className="ops-warning" role="status">
+                进度更新失败：{job.pollError}。当前显示可能不是最新进度。
+              </p>
+            )}
+            {job.status === 'running' && job.stats?.lastError && (
+              <p className="ops-warning" role="status">
+                本次执行最近请求错误：{job.stats.lastError}
+                {job.stats.errors > 0 && `（累计 ${job.stats.errors} 个错误）`}
+                。任务尚未结束，此记录不一定属于当前文件。
+              </p>
+            )}
             {job.rawError && (
               <details className="transfer-diagnostic">
                 <summary>查看停止时的技术记录</summary>
@@ -595,7 +607,11 @@ function JobDetails({ id, onClose, notify, refresh }) {
                         {
                           {
                             pending: '等待传输',
-                            running: '正在传输',
+                            running:
+                              {
+                                waiting: '等待连接 / 读取',
+                                finishing: '等待完成确认',
+                              }[file.progressPhase] || '正在传输',
                             planned: '预演',
                             completed: '成功',
                             failed: '失败',
@@ -608,17 +624,28 @@ function JobDetails({ id, onClose, notify, refresh }) {
                       </td>
                       <td>{bytes(file.size)}</td>
                       <td>
-                        {file.status === 'running'
-                          ? `${bytes(file.bytes)} / ${bytes(file.size)}`
-                          : {
-                              same_size: '大小一致',
-                              hash_match: '哈希一致',
-                              different: '同名内容不同',
-                              directory: '目标是目录',
-                            }[file.check] || '—'}
+                        {file.status === 'running' ? (
+                          <>
+                            {bytes(file.bytes)} / {bytes(file.size)}
+                            {!job.stopping && file.idleSeconds >= 60 && (
+                              <p className="transfer-idle">已 {file.idleSeconds} 秒无字节进展</p>
+                            )}
+                          </>
+                        ) : (
+                          {
+                            same_size: '大小一致',
+                            hash_match: '哈希一致',
+                            different: '同名内容不同',
+                            directory: '目标是目录',
+                          }[file.check] || '—'
+                        )}
                       </td>
                       <td>
-                        {file.reason || file.error || '—'}
+                        {file.reason ||
+                          file.error ||
+                          (file.status === 'running' && !job.stopping && file.idleSeconds >= 60
+                            ? '可能在等待连接、读取或重试；具体原因请查看本次执行的请求错误。'
+                            : '—')}
                         {file.rawError && file.rawError !== (file.reason || file.error) && (
                           <details className="transfer-diagnostic">
                             <summary>技术记录</summary>
