@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import {
   mkdir,
   readFile,
@@ -18,6 +18,7 @@ import { Operations, ACTIVE, operationSettings, transferOptions } from './operat
 import { Notifications } from './notifications.mjs';
 import { Backups } from './backup.mjs';
 import { MediaRunner } from './media-runner.mjs';
+import { MediaScans } from './media-scans.mjs';
 import { mediaEnabled } from './media.mjs';
 import { openAuthentication } from './auth.mjs';
 import { Direct115 } from './direct115.mjs';
@@ -209,9 +210,47 @@ export async function createPanel(options = {}) {
       Retries: state.settings.retries,
     }),
   });
+  const scans = new MediaScans({
+    engine,
+    media,
+    resolveFs,
+    dataDir,
+    now: clock,
+    binding: async (input) => {
+      const configs = await dump();
+      const connections = [input.source.remote, input.destination.remote].map((name) => {
+        const group = driveGroups.record(name);
+        const members = group?.members.map((member) => member.remote) || [name];
+        return {
+          name,
+          localRoot: members.some(
+            (member) => member === 'local' || configs[member]?.type === 'local',
+          )
+            ? localRoot
+            : undefined,
+          direct: direct115.record(name),
+          cloud: cloudRecord(name),
+          group: group ? { name, members } : undefined,
+          configs: members.map((member) => {
+            const config = { ...configs[member] };
+            if (config.type === 'drive' && config.token) {
+              try {
+                config.token = JSON.parse(config.token).refresh_token || config.token;
+              } catch {}
+            }
+            return config;
+          }),
+        };
+      });
+      return createHash('sha256').update(JSON.stringify(connections)).digest('hex');
+    },
+  });
+  await scans.init();
+  media.backgroundPlan = (job, controller) => scans.planForJob(job, controller);
   const verificationTasks = new Set();
   await save();
   function freeRemote(name, schedules = false) {
+    if (scans.uses(name)) throw new AppError('该存储仍在扫描，请先完成或取消扫描。', 409);
     if (driveGroups.member(name))
       throw new AppError('该账号属于 Google group，请先从 group 移除后再修改或删除连接。', 409);
     if (
@@ -357,6 +396,8 @@ export async function createPanel(options = {}) {
     return operations.enqueue(input, schedule, options);
   }
   async function launchJob(input, schedule = null, queued = null) {
+    if (queued?.scanBinding && (await scans.binding(queued)) !== queued.scanBinding)
+      throw new AppError('存储连接已变更，请重新扫描后创建传输任务。', 409);
     const { source, destination } = await transferEndpoints(input);
     const dryRun = input.dryRun === true;
     const id = queued?.id || randomBytes(8).toString('hex');
@@ -485,6 +526,7 @@ export async function createPanel(options = {}) {
       await engine.call('job/stop', { jobid: job.jobId });
     job.stopping = true;
     job.stopReason = reason;
+    media.cancelPreparation(job.id);
   }
 
   const app = express();
@@ -1108,10 +1150,10 @@ export async function createPanel(options = {}) {
         ...operations.groups(req.body).map((group) => group.dailyBytes),
         driveGroups.maxFileBudget(req.body.destination.remote),
       ].filter(Boolean);
-      const plan = await media.preview({
-        ...req.body,
-        dailyBytes: budgets.length ? Math.min(...budgets) : 0,
-      });
+      const budget = budgets.length ? Math.min(...budgets) : 0;
+      const plan = req.body.scanId
+        ? await scans.analyzed(req.body.scanId, req.body, budget)
+        : await media.preview({ ...req.body, dailyBytes: budget });
       const oversizedCount = plan.oversizedCount;
       res.json({
         ...plan,
@@ -1127,6 +1169,18 @@ export async function createPanel(options = {}) {
     await transferEndpoints({ ...req.body, mode: 'copy', dryRun: true });
     res.json(await media.preview({ ...req.body, mode: 'copy' }));
   });
+  app.post('/api/media/scans', async (req, res) =>
+    res.status(202).json(
+      await serialize(async () => {
+        if (!mediaEnabled(req.body)) throw new AppError('扫描仅用于影视或多目录复制任务。');
+        await transferEndpoints({ ...req.body, mode: 'copy', dryRun: true });
+        return scans.create(req.body);
+      }),
+    ),
+  );
+  app.get('/api/media/scans', (req, res) => res.json(scans.list()));
+  app.get('/api/media/scans/:id', (req, res) => res.json(scans.view(scans.get(req.params.id))));
+  app.delete('/api/media/scans/:id', (req, res) => res.json(scans.cancel(req.params.id)));
   app.get('/api/notifications', (req, res) => res.json(notifications.view()));
   app.put('/api/notifications', async (req, res) =>
     res.json(
@@ -1146,9 +1200,11 @@ export async function createPanel(options = {}) {
   );
   app.post('/api/backups/restore', async (req, res) =>
     res.json(
-      await serialize(() =>
-        backups.restore(req.body.archive, req.body.passphrase, req.body.confirmRestore),
-      ),
+      await serialize(() => {
+        if (scans.list().some((scan) => ['queued', 'running', 'cancelling'].includes(scan.status)))
+          throw new AppError('请先完成或取消后台扫描，再恢复备份。', 409);
+        return backups.restore(req.body.archive, req.body.passphrase, req.body.confirmRestore);
+      }),
     ),
   );
   const findJob = (id) => {
@@ -1159,7 +1215,7 @@ export async function createPanel(options = {}) {
   app.get('/api/jobs', (req, res) =>
     res.json(
       state.jobs.map((job) => {
-        const { files, events, mediaRetryFiles, ...summary } = job;
+        const { files, events, mediaRetryFiles, mediaPlan, scanBinding, ...summary } = job;
         return { ...summary, fileCount: files?.length || 0 };
       }),
     ),
@@ -1377,7 +1433,10 @@ export async function createPanel(options = {}) {
   app.post('/api/jobs', async (req, res) =>
     res.json(
       await serialize(async () => {
-        const job = await startJob(req.body);
+        if (req.body.scanId && !mediaEnabled(req.body))
+          throw new AppError('扫描结果仅支持影视复制任务。');
+        const snapshot = req.body.scanId ? await scans.confirmed(req.body.scanId, req.body) : {};
+        const job = await startJob(req.body, null, snapshot);
         await save();
         return job;
       }),
@@ -1595,6 +1654,7 @@ export async function createPanel(options = {}) {
     tick,
     operations,
     direct115,
+    scans,
     driveGroups,
     backups,
     notifications,
@@ -1602,6 +1662,8 @@ export async function createPanel(options = {}) {
       closing = true;
       clearInterval(timer);
       clearInterval(services);
+      await scans.close();
+      await media.close();
       await authQueue.catch(() => {});
       await mutationQueue.catch(() => {});
       for (const job of state.jobs)

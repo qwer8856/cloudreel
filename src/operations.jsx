@@ -543,6 +543,14 @@ function JobDetails({ id, onClose, notify, refresh }) {
               </label>
               {job.currentFile && <span className="muted">当前：{job.currentFile}</span>}
             </div>
+            {job.mediaPreparing && (
+              <p className="ops-warning" aria-live="polite">
+                正在后台扫描来源：已读取 {job.scanProgress?.progress.directoriesDone || 0}{' '}
+                个目录，发现 {job.scanProgress?.progress.filesFound || 0} 个文件
+                {job.scanProgress?.currentPath && ` · 当前目录：${job.scanProgress.currentPath}`}。
+                可以暂停或停止任务。
+              </p>
+            )}
             {job.detailsTruncated && (
               <p className="ops-warning">明细记录已截断；完整重跑会重新检查并跳过已完成文件。</p>
             )}

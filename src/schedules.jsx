@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   CalendarClock,
@@ -19,6 +19,7 @@ import { TransferHint } from './cloud.jsx';
 import { ConfirmDialog, Dialog, Empty, Spinner } from './components.jsx';
 import { TransferControls, emptyTransferOptions } from './transfer-controls.jsx';
 import { MediaOptionsFields, defaultMediaOptions } from './media.jsx';
+import { MediaScanProgress, readScanDraft, useMediaScan } from './media-scan.jsx';
 import './schedules.css';
 
 const labels = {
@@ -336,9 +337,11 @@ export function SchedulesPage({ schedules, remotes, status, refresh, notify, ope
 }
 
 function ScheduleForm({ schedule, remotes, onClose, onDone }) {
+  const scanStorageKey = `cloudreel.schedule.scan.${schedule.id || 'new'}`;
+  const [savedScan] = useState(() => readScanDraft(scanStorageKey));
   const [transferOptions, setTransferOptions] = useState({
-    filters: schedule.filters || emptyTransferOptions.filters,
-    selections: schedule.selections || [],
+    filters: savedScan?.input?.filters || schedule.filters || emptyTransferOptions.filters,
+    selections: savedScan?.input?.selections || schedule.selections || [],
   });
   const [analysis, setAnalysis] = useState(null),
     [acknowledge, setAcknowledge] = useState(false);
@@ -349,21 +352,28 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
     startTime: schedule.startTime || '01:00',
     timezone: schedule.timezone || 'Asia/Shanghai',
     mode: schedule.mode || 'copy',
-    source: schedule.source || {
-      remote:
-        remotes.find(
-          (item) => !item.pending && ['openlist-115', 'direct-115', '115'].includes(item.type),
-        )?.name || 'local',
-      path: '',
-    },
-    destination: schedule.destination || {
-      remote:
-        remotes.find((item) => !item.pending && ['drive-group', 'drive'].includes(item.type))
-          ?.name || 'local',
-      path: '',
-    },
+    source: savedScan?.input?.source ||
+      schedule.source || {
+        remote:
+          remotes.find(
+            (item) => !item.pending && ['openlist-115', 'direct-115', '115'].includes(item.type),
+          )?.name || 'local',
+        path: '',
+      },
+    destination: savedScan?.input?.destination ||
+      schedule.destination || {
+        remote:
+          remotes.find((item) => !item.pending && ['drive-group', 'drive'].includes(item.type))
+            ?.name || 'local',
+        path: '',
+      },
     scanIntervalMinutes: schedule.scanIntervalMinutes || 0,
-    media: { ...defaultMediaOptions, enabled: !schedule.id, ...schedule.media },
+    media: {
+      ...defaultMediaOptions,
+      enabled: !schedule.id,
+      ...schedule.media,
+      ...savedScan?.input?.media,
+    },
     enabled: schedule.enabled ?? true,
     cutoffMode: schedule.cutoffMode || 'hard',
   });
@@ -378,7 +388,9 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
   );
   const [unit, setUnit] = useState(initialUnit);
   const [hours, setHours] = useState(schedule.dailySeconds ? schedule.dailySeconds / 3600 : 4);
-  const [sourcePathsText, setSourcePathsText] = useState((schedule.sourcePaths || []).join('\n'));
+  const [sourcePathsText, setSourcePathsText] = useState(
+    (savedScan?.input?.sourcePaths || schedule.sourcePaths || []).join('\n'),
+  );
   const sourcePaths = [
     ...new Set(
       sourcePathsText
@@ -388,7 +400,6 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
     ),
   ];
   const [preview, setPreview] = useState(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
   const [mediaConfirmed, setMediaConfirmed] = useState(false);
   const requiresMediaConfirmation =
     values.media.enabled &&
@@ -398,6 +409,25 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const scanTask = useMediaScan({
+    storageKey: scanStorageKey,
+    initialId: savedScan?.id,
+    onResult: (result) => {
+      setPreview(result);
+      setMediaConfirmed(false);
+      setError('');
+    },
+    onError: setError,
+  });
+  const previewBusy = scanTask.running;
+  const previewKey = JSON.stringify([
+    values.source,
+    values.destination,
+    sourcePathsText,
+    values.media,
+    transferOptions,
+  ]);
+  const lastPreviewKey = useRef(previewKey);
   const change = (key, value) => setValues((previous) => ({ ...previous, [key]: value }));
   useEffect(() => {
     setAnalysis(null);
@@ -416,8 +446,11 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
     transferOptions,
   ]);
   useEffect(() => {
+    if (lastPreviewKey.current === previewKey) return;
+    lastPreviewKey.current = previewKey;
     setPreview(null);
     setMediaConfirmed(false);
+    scanTask.reset();
   }, [values.source, values.destination, sourcePathsText, values.media, transferOptions]);
   useEffect(() => {
     if (values.mode === 'sync' || sourcePaths.length)
@@ -508,15 +541,13 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
     };
   }
   async function previewFiles() {
-    setPreviewBusy(true);
     setError('');
+    setPreview(null);
     try {
       if (sourcePaths.length > 20) throw new Error('最多设置 20 个来源目录。');
-      setPreview(await api('/media/preview', { method: 'POST', body: input() }));
+      await scanTask.start(input());
     } catch (error) {
       setError(error.message);
-    } finally {
-      setPreviewBusy(false);
     }
   }
   async function submit(event) {
@@ -536,9 +567,13 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
       if ((volumeLimited && !(Number(volume) > 0)) || (timeLimited && !(Number(hours) > 0)))
         throw new Error('启用的容量或时长限制必须大于 0。');
       if (values.cutoffMode === 'hard' && !acknowledge) {
+        if ((values.media.enabled || sourcePaths.length) && !preview?.scanId) {
+          await scanTask.start(input());
+          throw new Error('已启动后台扫描，请等待完成后再保存计划。');
+        }
         const inspected = await api('/transfers/analyze', {
           method: 'POST',
-          body: input(),
+          body: { ...input(), ...(preview?.scanId ? { scanId: preview.scanId } : {}) },
         });
         setAnalysis(inspected);
         if (inspected.warning)
@@ -548,6 +583,7 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
         method: schedule.id ? 'PUT' : 'POST',
         body: { ...input(), startTime },
       });
+      scanTask.reset();
       await onDone();
     } catch (error) {
       setError(error.message);
@@ -715,6 +751,7 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
               setAcknowledge(false);
             }}
             value={{ ...transferOptions, media: values.media, sourcePaths }}
+            scanId={preview?.scanId}
             allowSelections={!sourcePaths.length}
             onChange={(value) => {
               setTransferOptions({
@@ -926,6 +963,9 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
             </p>
           )}
         </fieldset>
+        <div className="schedule-scan-progress">
+          <MediaScanProgress task={scanTask} />
+        </div>
         <footer className="modal-footer">
           <button type="button" className="button secondary" disabled={busy} onClick={onClose}>
             取消

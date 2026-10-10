@@ -284,6 +284,12 @@
   border-radius: 10px;
   background: #f8faf7;
 }
+.schedule-scan-progress {
+  padding: 0 28px 16px;
+}
+.schedule-scan-progress:empty {
+  display: none;
+}
 .schedule-preview > p,
 .schedule-preview > small {
   display: block;

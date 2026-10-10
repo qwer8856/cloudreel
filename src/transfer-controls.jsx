@@ -24,6 +24,7 @@ export function TransferControls({
   onChange,
   mode = 'copy',
   dailyBytes = 0,
+  scanId,
   analysis: suppliedAnalysis,
   onAnalysis,
   acknowledge,
@@ -97,9 +98,11 @@ export function TransferControls({
     setAnalyzing(true);
     setError('');
     try {
+      if ((options.media?.enabled || options.sourcePaths?.length) && !scanId)
+        throw new Error('请先在下方完成后台扫描，再检查文件与额度。');
       const result = await api('/transfers/analyze', {
         method: 'POST',
-        body: { source, destination, mode, ...options, dailyBytes },
+        body: { source, destination, mode, ...options, dailyBytes, ...(scanId ? { scanId } : {}) },
       });
       setAnalysis(result);
       onAnalysis?.(result);

@@ -173,6 +173,35 @@
   border: 1px solid #d8e9df;
   border-radius: 12px;
 }
+.media-scan-progress {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid #d8e9df;
+  border-radius: 12px;
+  background: #f6faf8;
+  font-size: 13px;
+}
+.media-scan-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.media-scan-heading strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.media-scan-progress p {
+  margin: 10px 0;
+}
+.media-scan-progress small {
+  color: #65796d;
+  line-height: 1.7;
+}
+.media-scan-path {
+  overflow-wrap: anywhere;
+}
 .media-preview-summary {
   display: flex;
   align-items: center;

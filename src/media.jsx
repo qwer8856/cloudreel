@@ -16,6 +16,7 @@ import { api, bytes, providerInfo } from './api.js';
 import { ProviderBadge, Spinner } from './components.jsx';
 import { emptyTransferOptions, TransferControls } from './transfer-controls.jsx';
 import './media.css';
+import { MediaScanProgress, readScanDraft, useMediaScan } from './media-scan.jsx';
 
 export const defaultMediaOptions = {
   enabled: true,
@@ -180,6 +181,7 @@ function sourcePathsFromText(text) {
 }
 
 export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob, onSchedules }) {
+  const [savedScan] = useState(() => readScanDraft('cloudreel.media.scan'));
   const connected = remotes.filter((remote) => !remote.pending);
   const preferredTypes = (type) =>
     type === 'drive'
@@ -191,21 +193,42 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
     preferredTypes(type)
       .map((value) => connected.find((remote) => remote.type === value))
       .find(Boolean)?.name || '';
-  const [source, setSource] = useState({ remote: findPreferred('openlist-115'), path: '' });
-  const [destination, setDestination] = useState({ remote: findPreferred('drive'), path: '' });
-  const [name, setName] = useState('');
+  const [source, setSource] = useState(
+    savedScan?.input?.source || { remote: findPreferred('openlist-115'), path: '' },
+  );
+  const [destination, setDestination] = useState(
+    savedScan?.input?.destination || { remote: findPreferred('drive'), path: '' },
+  );
+  const [name, setName] = useState(savedScan?.input?.name || '');
   const [options, setOptions] = useState({
     ...emptyTransferOptions,
     sourcePaths: [],
-    media: { ...defaultMediaOptions },
+    filters: savedScan?.input?.filters || emptyTransferOptions.filters,
+    selections: savedScan?.input?.selections || [],
+    media: { ...defaultMediaOptions, ...savedScan?.input?.media },
   });
-  const [extraPaths, setExtraPaths] = useState('');
+  const [extraPaths, setExtraPaths] = useState(
+    (savedScan?.input?.sourcePaths || [])
+      .filter((p) => p !== savedScan?.input?.source?.path)
+      .join('\n'),
+  );
   const [preview, setPreview] = useState(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState('');
-  const previewGeneration = useRef(0);
+  const previewKey = JSON.stringify([source, destination, options, extraPaths]);
+  const lastPreviewKey = useRef(previewKey);
+  const scanTask = useMediaScan({
+    storageKey: 'cloudreel.media.scan',
+    initialId: savedScan?.id,
+    onResult: (result) => {
+      setPreview(result);
+      setConfirmed(false);
+      setError('');
+    },
+    onError: setError,
+  });
+  const previewBusy = scanTask.running;
   const paths = sourcePathsFromText(extraPaths);
   const multiple = paths.length > 0;
   useEffect(() => {
@@ -215,9 +238,11 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
       setDestination((current) => ({ ...current, remote: findPreferred('drive') }));
   }, [remotes]);
   useEffect(() => {
-    previewGeneration.current += 1;
+    if (lastPreviewKey.current === previewKey) return;
+    lastPreviewKey.current = previewKey;
     setPreview(null);
     setConfirmed(false);
+    scanTask.reset();
   }, [source, destination, options, extraPaths]);
   const payload = () => ({
     name,
@@ -240,19 +265,12 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
     paths.length < 20;
   async function scan() {
     if (previewBusy || !canTransfer) return;
-    setPreviewBusy(true);
     setError('');
-    const generation = previewGeneration.current;
+    setPreview(null);
     try {
-      const result = await api('/media/preview', { method: 'POST', body: payload() });
-      if (generation === previewGeneration.current) {
-        setPreview(result);
-        setConfirmed(false);
-      }
+      await scanTask.start(payload());
     } catch (error) {
-      if (generation === previewGeneration.current) setError(error.message);
-    } finally {
-      setPreviewBusy(false);
+      setError(error.message);
     }
   }
   async function submit(event) {
@@ -261,7 +279,10 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
     setBusy(true);
     setError('');
     try {
-      const job = await api('/jobs', { method: 'POST', body: payload() });
+      const job = await api('/jobs', {
+        method: 'POST',
+        body: { ...payload(), scanId: preview.scanId },
+      });
       notify('影视传输已加入队列');
       await refresh();
       onJob?.(job.id);
@@ -464,8 +485,8 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
           <div className="media-section-heading">
             <span>3</span>
             <div>
-              <h3>扫描后确认传输</h3>
-              <p>核对目标路径与已有文件，再把任务加入后台队列。</p>
+              <h3>后台扫描后确认传输</h3>
+              <p>按目录分批扫描，可查看进度和取消；完成后核对文件清单并确认传输。</p>
             </div>
           </div>
           <button
@@ -475,9 +496,10 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
             onClick={scan}
           >
             {previewBusy ? <Spinner /> : <RefreshCw size={16} />}
-            {previewBusy ? '正在扫描文件…' : '扫描与预览'}
+            {previewBusy ? '正在后台扫描…' : '扫描与预览'}
           </button>
         </fieldset>
+        <MediaScanProgress task={scanTask} />
         {preview && (
           <section className="media-preview" aria-live="polite">
             <div className="media-preview-summary">

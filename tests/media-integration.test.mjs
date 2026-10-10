@@ -91,6 +91,14 @@ test(
       }
       assert.fail(`影视校验超时: ${JSON.stringify(await call(`/jobs/${id}`))}`);
     }
+    async function prepared(job) {
+      for (let count = 0; count < 250; count++) {
+        const current = await call(`/jobs/${job.id}`);
+        if (!current.mediaPreparing) return current;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.fail('后台扫描准备超时');
+    }
     async function verify(id, mode) {
       await call(`/jobs/${id}/verify`, 'POST', { mode });
       return waitVerification(id);
@@ -158,7 +166,7 @@ test(
         assert.equal(preview.remainingBytes, preview.totalBytes);
         assert.ok(preview.files.every((file) => file.action === 'copy' && !file.exists));
         const created = await call('/jobs', 'POST', request);
-        assert.equal(created.files.length, 4);
+        assert.equal((await prepared(created)).files.length, 4);
         const ended = await finish(created.id);
         assert.ok(
           ended.files.every((file) => file.status === 'completed'),
@@ -351,6 +359,7 @@ test(
           rules: [{ pattern: '*.mkv', folder: '电影/{title}' }],
         });
         const created = await call('/jobs', 'POST', request);
+        await prepared(created);
         await unlink(path.join(root, 'retry/b.2023.1080p.mkv'));
         const failed = await finish(created.id, 'failed');
         assert.equal(failed.files.filter((file) => file.status === 'failed').length, 1);
@@ -367,6 +376,7 @@ test(
             },
           ],
         });
+        Object.assign(retry, await prepared(retry));
         assert.equal(retry.files.length, 1);
         assert.equal(retry.files[0].sourceFile, 'b.2023.1080p.mkv');
         assert.equal(retry.files[0].targetFile, '电影/b/b (2023).mkv');
@@ -546,6 +556,7 @@ test(
           assert.equal(retry.manualScheduleRun, true);
           assert.equal(retry.limits.bytes, 20 * 1024);
           assert.equal(retry.limits.seconds, 120 - usedBeforeRetry.seconds);
+          Object.assign(retry, await prepared(retry));
           assert.equal(retry.files.length, 1);
           assert.equal(retry.files[0].source.path, 'schedule-retry');
           assert.equal(

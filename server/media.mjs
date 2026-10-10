@@ -259,7 +259,7 @@ function targetFor(file, root, prefix, options, videosByFolder) {
   return cleanPath([prefix, directory, filename].filter(Boolean).join('/'));
 }
 
-export async function planMediaTransfer(input, { listFiles, resolveFs }) {
+export async function planMediaTransfer(input, { listFiles, resolveFs, signal }) {
   const configured = validateMediaOptions(input.media);
   const options = configured.enabled
     ? configured
@@ -277,6 +277,7 @@ export async function planMediaTransfer(input, { listFiles, resolveFs }) {
     scanned = 0,
     totalBytes = 0;
   for (let index = 0; index < roots.length; index++) {
+    signal?.throwIfAborted();
     const source = { remote: input.source.remote, path: roots[index] };
     await resolveFs(source);
     const listed = await listFiles({ ...input, source });
@@ -311,7 +312,12 @@ export async function planMediaTransfer(input, { listFiles, resolveFs }) {
       if (group.fingerprint && group.fingerprint !== fingerprint) group.commonMetadata = false;
       group.fingerprint = fingerprint;
     }
+    let processed = 0;
     for (const { file, relative, size } of normalized) {
+      if (++processed % 1000 === 0) {
+        await new Promise((resolve) => setImmediate(resolve));
+        signal?.throwIfAborted();
+      }
       const ext = extension(relative);
       if (
         (options.preset === 'videos' && !VIDEO.has(ext)) ||

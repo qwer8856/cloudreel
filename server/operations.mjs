@@ -415,7 +415,11 @@ export class Operations {
         : '',
     };
   }
-  async enqueue(input, schedule, { manual = false, mediaRetryFiles } = {}) {
+  async enqueue(
+    input,
+    schedule,
+    { manual = false, mediaRetryFiles, mediaPlan, scanId, scannedAt, scanBinding } = {},
+  ) {
     await this.transferEndpoints(input);
     const options = transferOptions(input);
     if (
@@ -448,6 +452,9 @@ export class Operations {
       files: [],
       events: [],
       ...(mediaRetryFiles ? { mediaRetryFiles: structuredClone(mediaRetryFiles) } : {}),
+      ...(mediaPlan
+        ? { mediaPlan: structuredClone(mediaPlan), scanId, scannedAt, scanBinding }
+        : {}),
       ...(schedule ? { scheduleId: schedule.id, manualScheduleRun: manual } : {}),
     };
     this.state.jobs.unshift(job);

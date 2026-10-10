@@ -41,9 +41,10 @@ function comparison(file, item) {
 export class MediaRunner {
   constructor(context) {
     Object.assign(this, context);
+    this.preparations = new Map();
   }
 
-  async plan(input) {
+  async plan(input, context = {}) {
     if (input.mediaRetryFiles?.length) {
       const files = input.mediaRetryFiles.map((file) => ({
         path: cleanPath(file.path),
@@ -59,6 +60,8 @@ export class MediaRunner {
           file.source,
           file.sourceFile,
           Boolean(Object.keys(file.hashes).length),
+          undefined,
+          context.signal,
         );
         if (current && !current.IsDir) {
           file.size = Number(current.Size);
@@ -73,8 +76,9 @@ export class MediaRunner {
       };
     }
     return planMediaTransfer(input, {
-      listFiles: (value) => this.listFiles(value),
+      listFiles: context.listFiles || ((value) => this.listFiles(value)),
       resolveFs: (value) => this.resolveFs(value),
+      signal: context.signal,
     });
   }
 
@@ -95,14 +99,20 @@ export class MediaRunner {
     }
   }
 
-  async stat(destination, relative, hashes = false, job) {
+  async stat(destination, relative, hashes = false, job, signal) {
     const target = await this.resolveFs(destination, job);
     try {
-      const result = await this.engine.call('operations/stat', {
-        fs: target.fs,
-        remote: cleanPath(relative),
-        opt: { showHash: hashes, noModTime: true, noMimeType: true },
-      });
+      const result = await this.engine.call(
+        'operations/stat',
+        {
+          fs: target.fs,
+          remote: cleanPath(relative),
+          opt: { showHash: hashes, noModTime: true, noMimeType: true },
+        },
+        35000,
+        false,
+        signal,
+      );
       return result.item || null;
     } catch (error) {
       if (missing(error)) return null;
@@ -110,9 +120,9 @@ export class MediaRunner {
     }
   }
 
-  async preview(input) {
-    const plan = await this.plan(input);
-    const target = await this.targetSnapshot(input.destination);
+  async preview(input, context = {}) {
+    const plan = context.plan || (await this.plan(input));
+    const target = context.target || (await this.targetSnapshot(input.destination));
     const options = validateMediaOptions(input.media);
     let skippedExisting = 0,
       conflicts = 0,
@@ -148,7 +158,48 @@ export class MediaRunner {
   }
 
   async start(job) {
-    const plan = await this.plan(job);
+    delete job.mediaPreparationError;
+    if (!job.mediaPlan && !(job.scanId && job.files?.length) && this.backgroundPlan) {
+      const controller = new AbortController();
+      job.mediaPreparing = true;
+      job.files = [];
+      job.stats = { bytes: 0, totalBytes: 0, transfers: 0, totalTransfers: 0, speed: 0 };
+      const promise = (async () => {
+        try {
+          const plan = await this.backgroundPlan(job, controller);
+          controller.signal.throwIfAborted();
+          this.initialize(job, plan);
+        } catch (error) {
+          job.mediaPreparationError = safeError(error.message);
+        } finally {
+          job.mediaPreparing = false;
+          this.preparations.delete(job.id);
+        }
+      })();
+      this.preparations.set(job.id, { controller, promise });
+      return;
+    }
+    const plan =
+      job.mediaPlan ||
+      (job.scanId && job.files?.length
+        ? {
+            files: job.files.map(({ path, source, sourceFile, targetFile, size, hashes }) => ({
+              path,
+              source,
+              sourceFile,
+              targetFile,
+              size,
+              hashes,
+            })),
+            totalFiles: job.files.length,
+            totalBytes: job.files.reduce((sum, file) => sum + file.size, 0),
+            skippedByFilter: job.mediaSkippedByFilter || 0,
+          }
+        : await this.plan(job));
+    this.initialize(job, plan);
+  }
+
+  initialize(job, plan) {
     if (
       !job.dryRun &&
       job.driveMaxFileBytes &&
@@ -165,6 +216,7 @@ export class MediaRunner {
       error: '',
       attempt: job.attempts,
     }));
+    delete job.mediaPlan;
     job.mediaTotalBytes = plan.totalBytes;
     job.mediaSkippedByFilter = plan.skippedByFilter;
     job.mediaIndex = 0;
@@ -223,6 +275,23 @@ export class MediaRunner {
 
   async poll(job) {
     let stats = await this.engine.call('core/stats', { group: job.group });
+    if (job.mediaPreparing)
+      return {
+        status: { finished: false },
+        stats: {
+          bytes: 0,
+          totalBytes: job.scanProgress?.progress.bytesFound || 0,
+          speed: 0,
+          transfers: 0,
+          totalTransfers: job.scanProgress?.progress.filesFound || 0,
+          skipped: 0,
+          conflicts: 0,
+          completedBytes: 0,
+          eta: null,
+        },
+      };
+    if (job.mediaPreparationError)
+      return { status: ended(false, job.mediaPreparationError), stats: this.summarize(job, stats) };
     if (job.jobId !== null && job.jobId !== undefined) {
       const status = await this.engine.call('job/status', { jobid: job.jobId });
       if (!status.finished) return { status, stats: this.summarize(job, stats) };
@@ -314,6 +383,20 @@ export class MediaRunner {
         job.mediaIndex++;
         processed++;
         continue;
+      }
+      if (job.scanId) {
+        try {
+          const source = await this.stat(
+            file.source,
+            file.sourceFile,
+            Boolean(Object.keys(file.hashes).length),
+          );
+          const current = comparison(file, source);
+          if (!source || !current.sameSize || current.comparison === 'different')
+            throw new AppError('来源文件已删除或与扫描结果不同，请重新扫描后创建任务。', 409);
+        } catch (error) {
+          return this.fail(job, file, error, stats);
+        }
       }
       const bytes = job.limits.bytes ? job.limits.bytes - (Number(stats.bytes) || 0) : 0;
       const seconds = job.limits.seconds
@@ -409,5 +492,13 @@ export class MediaRunner {
     if (!active()) throw new AppError('校验已中断。', 409);
     report.success = !report.differ.length && !report.missingOnDst.length && !report.error.length;
     return report;
+  }
+  cancelPreparation(id) {
+    this.preparations.get(id)?.controller.abort(new AppError('操作已停止。', 409));
+  }
+  async close() {
+    for (const { controller } of this.preparations.values())
+      controller.abort(new AppError('服务关闭，扫描已中断。', 409));
+    await Promise.allSettled([...this.preparations.values()].map((entry) => entry.promise));
   }
 }

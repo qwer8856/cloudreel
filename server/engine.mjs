@@ -91,7 +91,7 @@ export class Engine {
     }
   }
 
-  async call(endpoint, parameters = {}, timeout = 35000, starting = false) {
+  async call(endpoint, parameters = {}, timeout = 35000, starting = false, signal) {
     if (!this.ready && !starting) throw new AppError(this.error || 'rclone 尚未就绪。', 503);
     let response;
     try {
@@ -99,9 +99,12 @@ export class Engine {
         method: 'POST',
         headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
         body: JSON.stringify(parameters),
-        signal: AbortSignal.timeout(timeout),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+          : AbortSignal.timeout(timeout),
       });
     } catch (error) {
+      if (signal?.aborted) throw signal.reason;
       throw new AppError(
         error.name === 'TimeoutError'
           ? 'rclone 请求超时，请检查远程连接。'
