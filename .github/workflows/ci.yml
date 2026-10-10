@@ -26,7 +26,7 @@ jobs:
         run: |
           curl -fsSLO https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip
           curl -fsSLo SHA256SUMS https://downloads.rclone.org/v1.75.1/SHA256SUMS
-          rg ' [*]?rclone-v1[.]75[.]1-linux-amd64[.]zip$' SHA256SUMS | sha256sum --check --strict -
+          grep -E ' [*]?rclone-v1[.]75[.]1-linux-amd64[.]zip$' SHA256SUMS | sha256sum --check --strict -
           unzip -q rclone-v1.75.1-linux-amd64.zip
       - name: Test
         run: npm test
