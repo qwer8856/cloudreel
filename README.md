@@ -1,4 +1,4 @@
-# CloudReel 1.0.3 · 115 → Google Drive 影视传输助手
+# CloudReel 1.0.4 · 115 → Google Drive 影视传输助手
 
 [GitHub 仓库](https://github.com/qwer8856/cloudreel) · [Docker Hub 镜像](https://hub.docker.com/r/gongjuren8856/cloudreel)
 
@@ -37,6 +37,12 @@
 Google Drive 允许同一级存在多个同名文件或文件夹。当前按名称路径查询可能产生歧义，请先处理目标目录内已有的重复名称；本版没有自动保留两份、全盘内容去重或选择同名对象 ID 的功能。多个来源重名或归档后路径碰撞会提示调整规则，避免误覆盖。
 
 已传文件检查以实际目标路径为准，适用于手动再次执行和计划增量扫描。任务在服务器后台运行，关闭浏览器仍可继续；数据通常经服务器从 115 下载再上传 Google Drive，需要服务器具备相应上下行带宽。
+
+### 停止与下载失败原因
+
+点击停止或暂停后，当前请求会取消，任务详情显示用户操作原因，`context canceled` 保存在可展开的技术记录中；已完成文件保留。停止前真实失败的文件仍显示失败，可以只重试失败文件或恢复整个任务。
+
+115 直接连接的失败提示区分目录列表、取得下载地址和文件下载阶段，并显示接口 HTTP 状态、115 错误码及返回说明、DNS / 连接错误或请求超过 20 秒。旧版本的统一 502 提示没有保存底层原因，更新后重试才能取得新的具体记录。诊断输出隐藏 Cookie 和内部读取凭据。
 
 ### 大目录后台扫描
 
@@ -79,7 +85,7 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 ## Linux / Docker 部署
 
-默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.3`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.4`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
 取得部署配置并准备数据目录：
 
@@ -96,7 +102,7 @@ sudo chmod 700 data/config data/panel
 ```yaml
 services:
   cloudreel:
-    image: gongjuren8856/cloudreel:1.0.3
+    image: gongjuren8856/cloudreel:1.0.4
     container_name: cloudreel
     restart: unless-stopped
     init: true
@@ -144,12 +150,12 @@ OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内
 
 升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
 
-[v1.0.3 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.3) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
+[v1.0.4 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.4) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-docker load -i cloudreel-1.0.3-linux-amd64.tar.gz
-# ARM64 服务器将上面的文件名换成 cloudreel-1.0.3-linux-arm64.tar.gz
+docker load -i cloudreel-1.0.4-linux-amd64.tar.gz
+# ARM64 服务器将上面的文件名换成 cloudreel-1.0.4-linux-arm64.tar.gz
 docker compose up -d --pull never
 ```
 
@@ -338,7 +344,7 @@ group 使用账号硬预算，达到限制立即停止，计划的“完成当�
 
 “检查文件与额度”递归统计符合条件的文件、总大小与最大文件，并提示超过每日容量的文件。立即停止方式的计划在保存前执行检查；发现大文件后需改成完成当前文件或确认继续。目录分析最多处理 100000 个文件，较大目录请分成子目录。
 
-任务详情提供文件成功、失败、跳过记录、执行日志和 CSV 下载，每页展示 100 条。影视任务扫描后保存完整清单，最多 100000 个文件，不依赖 rclone 最近完成记录采样；预览的 200 项展示限制不影响实际传输清单。失败重试使用已保存的来源和归档目标映射，不会因重新整理规则而改到其他位置。
+任务详情提供文件成功、失败、跳过、已检查与已停止记录、原因、执行日志和 CSV 下载，每页展示 100 条。普通目录任务中 rclone 的 `checked` 仅表示比较检查，不代表跳过或传输成功；已有目标跳过会说明大小 / 共同哈希匹配、同名内容不同或目标是目录。复制文件时创建所需父目录，不预先创建整棵来源目录树，纯空目录不复制。影视任务扫描后保存完整清单，最多 100000 个文件，不依赖 rclone 最近完成记录采样；预览的 200 项展示限制不影响实际传输清单。失败重试使用已保存的来源和归档目标映射，不会因重新整理规则而改到其他位置。
 
 只重试失败文件会创建新的复制任务，保留目标其他文件；普通恢复重新检查原任务目录。非影视目录任务的明细仍每秒从 rclone 完成记录采样，保留最近 10000 条；rclone 单次只返回最近 100 条，极快的小文件任务可能缺少部分明细，界面会提示。失败记录不完整时可恢复整个任务，已完成文件会按后端规则跳过。
 

@@ -309,6 +309,11 @@ test(
         assert.equal(ended.stats.bytes, 0);
         assert.equal(ended.stats.conflicts, 1);
         assert.ok(ended.files.every((file) => file.status === 'skipped'));
+        assert.match(
+          ended.files.find((file) => file.sourceFile === '冲突.mkv').reason,
+          /大小或共同哈希不同/,
+        );
+        assert.equal(ended.files.find((file) => file.sourceFile === '冲突.mkv').error, '');
         assert.equal(
           await readFile(path.join(root, 'existing-target/冲突.mkv'), 'utf8'),
           'keep existing larger file',

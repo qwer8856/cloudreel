@@ -163,6 +163,25 @@
   border-radius: 8px;
   font-size: 12px;
 }
+.transfer-files th:nth-child(3),
+.transfer-files td:nth-child(3),
+.transfer-files th:nth-child(4),
+.transfer-files td:nth-child(4) {
+  white-space: nowrap;
+}
+.transfer-files th:last-child,
+.transfer-files td:last-child {
+  min-width: 180px;
+}
+.transfer-diagnostic {
+  margin-top: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.transfer-diagnostic summary {
+  cursor: pointer;
+  color: #587568;
+}
 .status-badge.queued,
 .status-badge.retry_wait,
 .status-badge.waiting_quota {

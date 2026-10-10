@@ -135,6 +135,64 @@ test(
     }
     try {
       await start();
+      await t.test(
+        '复制按当前文件创建父目录，停止说明取消原因，恢复后只创建有文件的目录',
+        async () => {
+          const directories = Array.from({ length: 8 }, (_, i) => `电影${i}`);
+          for (const directory of directories) {
+            await mkdir(path.join(root, 'lazy-source', directory), { recursive: true });
+            await writeFile(
+              path.join(root, 'lazy-source', directory, '视频.mkv'),
+              Buffer.alloc(1024 ** 2, 7),
+            );
+          }
+          await mkdir(path.join(root, 'lazy-source', '空目录', '更深空目录'), { recursive: true });
+          await call('/settings', 'PUT', {
+            transfers: 1,
+            checkers: 2,
+            retries: 1,
+            bandwidth: '32K',
+          });
+          const job = await call('/jobs', 'POST', input('lazy-source', 'lazy-target'));
+          let created = [];
+          for (let i = 0; i < 100; i++) {
+            try {
+              created = await readdir(path.join(root, 'lazy-target'));
+            } catch (error) {
+              if (error.code !== 'ENOENT') throw error;
+            }
+            if (created.length) break;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          assert.ok(
+            created.length > 0 && created.length < directories.length,
+            JSON.stringify(created),
+          );
+          assert.equal(created.includes('空目录'), false);
+          await call(`/jobs/${job.id}/stop`, 'POST', {});
+          const stopped = await finish(job.id, 'stopped');
+          assert.match(stopped.reason, /用户已停止/);
+          assert.equal(stopped.error, '');
+          assert.doesNotMatch(stopped.events.at(-1).message, /context canceled/);
+          assert.ok(stopped.files.some((file) => file.status === 'stopped'));
+          await call('/settings', 'PUT', { transfers: 1, checkers: 2, retries: 1, bandwidth: '' });
+          await call(`/jobs/${job.id}/resume`, 'POST', {});
+          await finish(job.id);
+          assert.deepEqual((await readdir(path.join(root, 'lazy-target'))).sort(), directories);
+          assert.deepEqual(
+            await readFile(path.join(root, 'lazy-target', directories[7], '视频.mkv')),
+            Buffer.alloc(1024 ** 2, 7),
+          );
+          const same = await finish(
+            (await call('/jobs', 'POST', input('lazy-source', 'lazy-target'))).id,
+          );
+          assert.ok(same.files.some((file) => file.status === 'checked'));
+          assert.equal(
+            same.files.some((file) => file.status === 'skipped'),
+            false,
+          );
+        },
+      );
       await t.test('真实 rclone 勾选目录与排除规则取交集，只复制选中文件', async () => {
         const job = await call('/jobs', 'POST', {
           ...input(),

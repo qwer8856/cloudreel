@@ -422,13 +422,8 @@ export async function createPanel(options = {}) {
       : await engine.call(`sync/${input.mode}`, {
           srcFs: source.fs,
           dstFs: destination.fs,
-          createEmptySrcDirs: !(
-            input.selections?.length ||
-            input.filters?.include?.length ||
-            input.filters?.exclude?.length ||
-            input.filters?.minSize ||
-            input.filters?.maxSize
-          ),
+          // Let each upload create its parents; do not pre-create the source tree.
+          createEmptySrcDirs: false,
           _async: true,
           _group: group,
           _filter: filter,
@@ -491,6 +486,8 @@ export async function createPanel(options = {}) {
         error: '',
       });
       delete queued.finishedAt;
+      delete queued.reason;
+      delete queued.rawError;
     } else state.jobs.unshift(job);
     state.jobs = [
       ...state.jobs.filter((item) => ACTIVE.includes(item.status) || item.status === 'paused'),
@@ -1235,7 +1232,7 @@ export async function createPanel(options = {}) {
     res.send(
       '\uFEFF' +
         [
-          ['文件', '目标文件', '状态', '大小', '已传字节', '检查', '错误', '时间'],
+          ['文件', '目标文件', '状态', '大小', '已传字节', '检查', '原因', '错误', '时间'],
           ...(job.files || []).map((file) => [
             file.path,
             file.targetFile || file.path,
@@ -1243,6 +1240,7 @@ export async function createPanel(options = {}) {
             file.size,
             file.bytes,
             file.check || '',
+            file.reason || '',
             file.error,
             file.at,
           ]),
@@ -1285,6 +1283,8 @@ export async function createPanel(options = {}) {
         job.status = 'queued';
         job.stopping = false;
         job.stopReason = null;
+        delete job.reason;
+        delete job.rawError;
         job.retries = 0;
         delete job.retryAt;
         await save();

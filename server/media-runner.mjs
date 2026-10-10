@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { AppError, cleanPath, safeError } from './validation.mjs';
+import { stopMessage, wasCancelled, transferError, skipMessage } from './transfer-reasons.mjs';
 import { planMediaTransfer, validateMediaOptions } from './media.mjs';
 
 const missing = (error) =>
@@ -265,6 +266,7 @@ export class MediaRunner {
   fail(job, file, error, stats) {
     file.status = 'failed';
     file.error = safeError(error.message);
+    file.reason = transferError(error.message);
     file.speed = 0;
     file.at = new Date().toISOString();
     job.mediaFailure ||= file.error;
@@ -300,10 +302,15 @@ export class MediaRunner {
       if (file) {
         file.at = status.endTime || new Date().toISOString();
         file.speed = 0;
-        if (job.stopping) file.status = 'pending';
-        else if (!status.success) {
+        if (job.stopping && (!status.error || wasCancelled(status.error, job) || status.success)) {
+          file.status = 'pending';
+          file.reason = stopMessage(job);
+          file.rawError = safeError(status.error || '');
+          file.error = '';
+        } else if (!status.success) {
           file.status = 'failed';
           file.error = safeError(status.error || '文件传输失败。');
+          file.reason = transferError(file.error);
           job.mediaFailure ||= file.error;
           if (
             /max transfer limit|transfer limit reached|max duration|duration limit|uploadLimitExceeded|dailyLimitExceeded|upload limit reached|401|403|429|unauthor|登录|认证|授权|timeout|connection|network|无法连接|请求超时/i.test(
@@ -369,9 +376,8 @@ export class MediaRunner {
       if (check.comparison === 'directory' || (check.exists && options.conflict === 'skip')) {
         file.status = 'skipped';
         file.check = check.comparison;
-        file.error = ['different', 'directory'].includes(check.comparison)
-          ? '目标同名文件不同或为目录，已保留目标。'
-          : '';
+        file.reason = skipMessage(check.comparison);
+        file.error = '';
         file.at = new Date().toISOString();
         job.mediaIndex++;
         processed++;

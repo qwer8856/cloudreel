@@ -9,7 +9,7 @@ COPY src ./src
 RUN npm run build
 
 FROM node:24-alpine AS runtime
-ARG CLOUDREEL_VERSION=1.0.3
+ARG CLOUDREEL_VERSION=1.0.4
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="CloudReel" \
     org.opencontainers.image.description="115 to Google Drive media transfer assistant" \

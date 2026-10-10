@@ -111,8 +111,9 @@ export function sanitizeRemote(name, config, provider, pending) {
 export function safeError(message) {
   return String(message)
     .replace(/(https?:\/\/)[^/@\s]+:[^/@\s]+@/g, '$1***@')
+    .replace(/(https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/)\b[a-f0-9]{48}\//gi, '$1***/')
     .replace(
-      /(\b(?:\w*token|\w*secret|password|pass|cookie|access_key|authorization)\b["'\s:=]+)[^\s,}\n]+/gi,
+      /(\b(?:\w*token|\w*secret|password|pass|cookie|access_key|authorization|UID|CID|SEID|KID)\b["'\s:=]+)[^\s,;}\n]+/gi,
       '$1***',
     )
     .slice(0, 700);

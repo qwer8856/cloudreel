@@ -1,7 +1,14 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AppError, cleanPath, safeError } from './validation.mjs';
+import {
+  stopMessage,
+  wasCancelled,
+  transferError,
+  skipMessage,
+  CHECK_REASON,
+} from './transfer-reasons.mjs';
 import { calendar, usage, exhausted } from './scheduling.mjs';
 import { mediaEnabled, normalizeSourcePaths, validateMediaOptions } from './media.mjs';
 
@@ -128,6 +135,34 @@ export class Operations {
       job.media ||= validateMediaOptions();
       job.files ||= [];
       job.events ||= [];
+      // Repair the old RC checking/skip label without changing genuine media skips.
+      for (const file of job.files) {
+        if (file.status === 'skipped' && String(file.key).includes(':checking:')) {
+          file.status = 'checked';
+          file.reason = CHECK_REASON;
+        }
+        if (file.status === 'skipped') file.reason ||= skipMessage(file.check);
+        if (wasCancelled(file.error || '', job)) {
+          file.rawError = safeError(file.error);
+          file.error = '';
+          file.status = 'stopped';
+          file.reason = stopMessage(job);
+        } else if (file.error) file.reason ||= transferError(file.error);
+        if (!/^[a-f0-9]{32}$/.test(file.key || ''))
+          file.key = createHash('sha256')
+            .update(String(file.key || file.path))
+            .digest('hex')
+            .slice(0, 32);
+      }
+      if (wasCancelled(job.error || '', job)) {
+        job.rawError = safeError(job.error);
+        job.error = '';
+        job.reason = stopMessage(job);
+      }
+      for (const event of job.events)
+        event.message = wasCancelled(event.message, job)
+          ? stopMessage(job)
+          : safeError(event.message);
       if (job.verification?.status === 'running') job.verification.status = 'interrupted';
       if (!job.scheduleId && job.status === 'interrupted') {
         job.status = this.state.operations.autoResume && job.recoverOnStart ? 'queued' : 'paused';
@@ -542,23 +577,38 @@ export class Operations {
     const data = await this.engine.call('core/transferred', { group: job.group });
     const seen = new Set(job.files.map((file) => file.key));
     for (const item of data.transferred || []) {
-      const key = `${job.attempts}:${item.timestamp}:${item.name}:${item.what}:${item.error || ''}`;
+      const time = item.completed_at || item.started_at || item.timestamp;
+      const key = createHash('sha256')
+        .update(`${job.attempts}:${time}:${item.name}:${item.what}:${item.error || ''}`)
+        .digest('hex')
+        .slice(0, 32);
       if (seen.has(key)) continue;
-      const timestamp =
-        typeof item.timestamp === 'number' ? item.timestamp : Date.parse(item.timestamp);
+      const timestamp = typeof time === 'number' ? time : Date.parse(time);
+      const cancelled = wasCancelled(item.error || '', job);
+      const checking = item.checked || item.what === 'checking';
       job.files.push({
         key,
         path: item.name,
         size: item.size,
         bytes: item.bytes,
-        status: item.error
-          ? 'failed'
-          : item.what === 'deleting'
-            ? 'deleted'
-            : item.checked
-              ? 'skipped'
-              : 'completed',
-        error: safeError(item.error || ''),
+        status: cancelled
+          ? 'stopped'
+          : item.error
+            ? 'failed'
+            : item.what === 'deleting'
+              ? 'deleted'
+              : checking
+                ? 'checked'
+                : 'completed',
+        reason: cancelled
+          ? stopMessage(job)
+          : checking && !item.error
+            ? CHECK_REASON
+            : item.error
+              ? transferError(item.error)
+              : '',
+        error: cancelled ? '' : safeError(item.error || ''),
+        rawError: item.error ? safeError(item.error) : '',
         at: Number.isFinite(timestamp)
           ? new Date(timestamp).toISOString()
           : new Date(this.now()).toISOString(),
@@ -581,6 +631,11 @@ export class Operations {
     if (['running', 'queued', 'retry_wait', 'blocked', 'waiting_quota'].includes(job.status))
       job.status = status.success ? 'completed' : 'failed';
     const error = safeError(status.error || job.error || '');
+    if (job.stopping) {
+      job.reason = stopMessage(job);
+      job.rawError = error;
+      if (wasCancelled(error, job) || /操作已停止/.test(error)) job.error = '';
+    }
     const kind = failureKind(error);
     const sharedExhausted = this.groups(job).some((group) => {
       const day = usage(group, calendar(this.now(), group.timezone).date);
@@ -588,6 +643,7 @@ export class Operations {
     });
     if (
       !status.success &&
+      (!job.stopping || ['rollover', 'quota_rollover'].includes(job.stopReason)) &&
       this.driveGroups?.rotate(
         job,
         error,
@@ -684,7 +740,14 @@ export class Operations {
         }
       }
     }
-    this.event(job, job.waitReason || `执行结束：${job.status}${error ? `；${error}` : ''}`);
+    const failureCount = job.files?.filter((file) => file.status === 'failed').length || 0;
+    this.event(
+      job,
+      job.waitReason ||
+        (job.stopping
+          ? `${stopMessage(job)}${failureCount ? `另有 ${failureCount} 个文件读取或传输失败，请查看文件原因。` : ''}${job.error ? `；${job.error}` : ''}`
+          : `执行结束：${job.status}${error ? `；${transferError(error)}` : ''}`),
+    );
     if (['completed', 'failed'].includes(job.status)) await this.notify(job.status, job);
     if (job.status === 'limited') await this.notify('quota', job);
   }

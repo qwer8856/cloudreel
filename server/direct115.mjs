@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import QRCode from 'qrcode';
-import { AppError, cleanPath, remoteName } from './validation.mjs';
+import { AppError, cleanPath, remoteName, safeError } from './validation.mjs';
 import { encode115, decode115 } from './115-cipher.mjs';
 
 const UA = 'Mozilla/5.0 115Browser/27.0.5.7';
@@ -66,36 +66,119 @@ export function downloadHost115(url) {
   return parsed;
 }
 
+function waitForRequest(previous, signal) {
+  signal?.throwIfAborted();
+  if (!signal) return previous;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    previous.then(() => {
+      signal.removeEventListener('abort', abort);
+      signal.aborted ? reject(signal.reason) : resolve();
+    });
+  });
+}
+
+function requestStage(url) {
+  const path = new URL(url).pathname;
+  return path.includes('downurl')
+    ? '下载地址接口'
+    : path === '/files'
+      ? '目录列表接口'
+      : '登录接口';
+}
+
+function networkError115(error, stage, timeoutMs) {
+  const code = error?.cause?.code || error?.code;
+  const detail = {
+    ENOTFOUND: 'DNS 解析失败',
+    EAI_AGAIN: 'DNS 解析暂时失败',
+    ECONNREFUSED: '连接被拒绝',
+    ECONNRESET: '连接被重置',
+    UND_ERR_SOCKET: '连接意外关闭',
+    ETIMEDOUT: '连接超时',
+    UND_ERR_CONNECT_TIMEOUT: '连接超时',
+    UND_ERR_HEADERS_TIMEOUT: '等待响应头超时',
+    CERT_HAS_EXPIRED: 'TLS 证书已过期',
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'TLS 证书验证失败',
+    DEPTH_ZERO_SELF_SIGNED_CERT: 'TLS 证书验证失败',
+  }[code];
+  return new AppError(
+    error?.name === 'TimeoutError'
+      ? `115 ${stage}请求超时${timeoutMs ? `（超过 ${timeoutMs / 1000} 秒）` : ''}；服务器未及时响应，请稍后重试。`
+      : `115 ${stage}${detail ? `${detail}（${code}）` : '网络请求失败'}；请检查部署服务器到 115 的网络连通性。`,
+    502,
+  );
+}
+
 export class Client115 {
-  constructor(cookie, fetcher = fetch) {
+  constructor(cookie, fetcher = fetch, { requestTimeout = 20000, metadataInterval = 400 } = {}) {
     this.cookie = cookie;
     this.fetch = fetcher;
     this.queue = Promise.resolve();
+    this.requestTimeout = requestTimeout;
+    this.metadataInterval = metadataInterval;
   }
-  async request(url, form, authenticated = true) {
+  async request(url, form, authenticated = true, signal) {
     // Keep metadata traffic sequential per connection; large recursive scans otherwise trigger throttling.
     const previous = this.queue;
     let release;
     this.queue = new Promise((resolve) => {
       release = resolve;
     });
-    await previous;
+    let started = false;
+    let requestSignal;
+    const stage = requestStage(url);
     try {
+      await waitForRequest(previous, signal);
+      signal?.throwIfAborted();
+      started = true;
+      requestSignal = AbortSignal.any([
+        AbortSignal.timeout(this.requestTimeout),
+        ...(signal ? [signal] : []),
+      ]);
       const response = await this.fetch(url, {
         method: form ? 'POST' : 'GET',
         headers: { 'User-Agent': UA, ...(authenticated ? { Cookie: this.cookie } : {}) },
         body: form ? new URLSearchParams(form) : undefined,
-        signal: AbortSignal.timeout(20000),
+        signal: requestSignal,
         redirect: 'error',
       });
-      if (!response.ok) throw new AppError(`115 请求失败（HTTP ${response.status}）。`, 502);
-      const data = await response.json();
-      if (data.state === false || (data.errno && Number(data.errno) !== 0)) {
-        const code = Number(data.errno || data.code);
+      if (!response.ok) {
+        await response.body?.cancel();
         throw new AppError(
-          [99, 911, 40101032].includes(code)
-            ? '115 登录失效或需要在官方客户端完成验证。'
-            : `115 接口拒绝请求（${code || '未知错误'}）。`,
+          `115 ${stage}返回 HTTP ${response.status}${response.status === 429 ? '；请求过于频繁，请降低并发并稍后重试' : ''}。`,
+          502,
+        );
+      }
+      let data;
+      try {
+        data = await response.json();
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        const type = (response.headers.get('content-type') || '未知类型').split(';')[0];
+        throw new AppError(
+          `115 ${stage}返回非 JSON 响应（HTTP ${response.status}，${safeError(type)}）。`,
+          502,
+        );
+      }
+      if (!data || typeof data !== 'object' || Array.isArray(data))
+        throw new AppError(`115 ${stage}响应格式无效（需要 JSON 对象）。`, 502);
+      if (data.state === false || data.state === 0 || (data.errno && Number(data.errno) !== 0)) {
+        const code = String(data.errno || data.code || '未知错误')
+          .replace(/[^\w-]/g, '')
+          .slice(0, 40);
+        let message = String(data.message || data.msg || data.error || '').replace(
+          /https?:\/\/\S+/g,
+          '[地址已隐藏]',
+        );
+        for (const entry of this.cookie.split(';')) {
+          const value = entry.slice(entry.indexOf('=') + 1).trim();
+          if (value) message = message.replaceAll(value, '***');
+        }
+        message = safeError(message).slice(0, 180);
+        throw new AppError(
+          `115 ${stage}拒绝请求（错误码 ${code}）${[99, 911, 40101032].includes(Number(code)) ? '；登录失效或需要在官方客户端完成验证' : ''}${message ? `；${message}` : ''}。`,
           502,
         );
       }
@@ -107,13 +190,21 @@ export class Client115 {
           .join('; '),
       };
     } catch (error) {
+      if (signal?.aborted && signal.reason?.name !== 'TimeoutError') throw signal.reason;
       if (error instanceof AppError) throw error;
-      throw new AppError('115 请求超时或接口响应无效，请稍后重试。', 502);
+      throw networkError115(
+        requestSignal?.aborted ? requestSignal.reason : error,
+        stage,
+        this.requestTimeout,
+      );
     } finally {
-      setTimeout(release, 400).unref?.();
+      const finish = () =>
+        this.metadataInterval ? setTimeout(release, this.metadataInterval).unref?.() : release();
+      if (started) finish();
+      else previous.then(release);
     }
   }
-  async list(cid) {
+  async list(cid, signal) {
     const files = [];
     for (let offset = 0; ;) {
       const query = new URLSearchParams({
@@ -129,7 +220,12 @@ export class Client115 {
         format: 'json',
         fc_mix: '0',
       });
-      const { data } = await this.request(`https://webapi.115.com/files?${query}`);
+      const { data } = await this.request(
+        `https://webapi.115.com/files?${query}`,
+        undefined,
+        true,
+        signal,
+      );
       if (
         !Array.isArray(data.data) ||
         String(data.cid) !== cid ||
@@ -175,24 +271,35 @@ export class Client115 {
       {
         data: encoded.data,
       },
+      true,
+      signal,
     );
     let url;
     try {
       url = Object.values(JSON.parse(decode115(data.data, encoded.key)))[0]?.url?.url;
     } catch {
-      throw new AppError('115 下载响应无法解析。', 502);
+      throw new AppError('115 下载地址接口响应无法解密或解析，未取得文件下载地址。', 502);
     }
+    return this.downloadResponse(url, cookies, range, signal);
+  }
+  async downloadResponse(url, cookies, range, signal) {
     let target = downloadHost115(url);
     for (let redirects = 0; redirects < 5; redirects++) {
-      const response = await this.fetch(target, {
-        headers: {
-          'User-Agent': UA,
-          Cookie: `${this.cookie}${cookies ? `; ${cookies}` : ''}`,
-          ...(range ? { Range: range } : {}),
-        },
-        redirect: 'manual',
-        signal,
-      });
+      let response;
+      try {
+        response = await this.fetch(target, {
+          headers: {
+            'User-Agent': UA,
+            Cookie: `${this.cookie}${cookies ? `; ${cookies}` : ''}`,
+            ...(range ? { Range: range } : {}),
+          },
+          redirect: 'manual',
+          signal,
+        });
+      } catch (error) {
+        if (signal?.aborted && signal.reason?.name !== 'TimeoutError') throw signal.reason;
+        throw networkError115(signal?.aborted ? signal.reason : error, '文件下载');
+      }
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         target = downloadHost115(new URL(response.headers.get('location'), target));
@@ -200,7 +307,10 @@ export class Client115 {
       }
       if (![200, 206, 416].includes(response.status)) {
         await response.body?.cancel();
-        throw new AppError(`115 下载失败（HTTP ${response.status}）。`, 502);
+        throw new AppError(
+          `115 文件下载服务器返回 HTTP ${response.status}；文件内容未能读取。`,
+          502,
+        );
       }
       return response;
     }
@@ -356,6 +466,7 @@ export class Direct115 {
   async start() {
     this.server = http.createServer((req, res) =>
       this.serve(req, res).catch((error) => {
+        if (res.destroyed || res.writableEnded) return;
         if (res.headersSent) {
           res.destroy();
           return;
@@ -373,20 +484,22 @@ export class Direct115 {
     if (!this.record(name)) throw new AppError('115 连接不存在。', 404);
     return `:webdav,url='${this.base}${encodeURIComponent(name)}/',vendor=other:${cleanPath(relative)}`;
   }
-  async list(record, id) {
+  async list(record, id, signal) {
+    signal?.throwIfAborted();
     const key = `${record.name}:${id}`,
       cached = this.paths.get(key);
     if (cached && cached.until > this.now()) return cached.value;
-    const value = await this.client(record).list(id);
+    const value = await this.client(record).list(id, signal);
+    signal?.throwIfAborted();
     if (this.paths.size >= 500) this.paths.clear();
     this.paths.set(key, { value, until: this.now() + 15000 });
     return value;
   }
-  async lookup(record, relative) {
+  async lookup(record, relative, signal) {
     let item = { id: record.rootId, name: '', isDir: true, size: 0 };
     for (const segment of cleanPath(relative).split('/').filter(Boolean)) {
       if (!item.isDir) throw new AppError('文件不存在。', 404);
-      const items = await this.list(record, item.id);
+      const items = await this.list(record, item.id, signal);
       item = items.find((value) => value.name === segment);
       if (!item) throw new AppError('文件不存在。', 404);
     }
@@ -407,14 +520,16 @@ export class Direct115 {
       res.end();
       return;
     }
-    const item = await this.lookup(record, relative);
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    const item = await this.lookup(record, relative, controller.signal);
     if (req.method === 'PROPFIND') {
       if (!['0', '1', undefined].includes(req.headers.depth))
         throw new AppError('不支持的目录深度。', 405);
       const entries = [{ ...item, relative }];
       if (item.isDir && req.headers.depth !== '0')
         entries.push(
-          ...(await this.list(record, item.id)).map((file) => ({
+          ...(await this.list(record, item.id, controller.signal)).map((file) => ({
             ...file,
             relative: [relative, file.name].filter(Boolean).join('/'),
           })),
@@ -445,8 +560,6 @@ export class Direct115 {
     }
     if (req.headers.range && !/^bytes=\d*-\d*$/.test(req.headers.range))
       throw new AppError('无效的文件范围。');
-    const controller = new AbortController();
-    res.on('close', () => controller.abort());
     const response = await this.client(record).download(
       item.pickcode,
       req.headers.range,

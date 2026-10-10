@@ -486,6 +486,18 @@ function JobDetails({ id, onClose, notify, refresh }) {
                 {job.retryAt && ` · ${time(job.retryAt)}`}
               </p>
             )}
+            {job.reason && (
+              <p className="muted" role="status">
+                {job.reason}
+              </p>
+            )}
+            {job.error && <p className="form-error">{job.error}</p>}
+            {job.rawError && (
+              <details className="transfer-diagnostic">
+                <summary>查看停止时的技术记录</summary>
+                <p>{job.rawError}</p>
+              </details>
+            )}
             <div className="ops-toolbar">
               {pending.includes(job.status) && (
                 <button
@@ -523,6 +535,12 @@ function JobDetails({ id, onClose, notify, refresh }) {
               </a>
             </div>
             <h3>文件明细</h3>
+            {job.files.some((file) => file.status === 'checked') && (
+              <p className="muted">
+                “已检查”是 rclone 的比较记录，不代表跳过或传输成功。真实跳过和失败会在“原因 /
+                错误”中说明。
+              </p>
+            )}
             <div className="ops-toolbar">
               <label className="field">
                 <span>显示文件</span>
@@ -539,6 +557,8 @@ function JobDetails({ id, onClose, notify, refresh }) {
                   <option value="completed">成功</option>
                   <option value="failed">失败</option>
                   <option value="skipped">跳过</option>
+                  <option value="checked">已检查</option>
+                  <option value="stopped">已停止</option>
                 </select>
               </label>
               {job.currentFile && <span className="muted">当前：{job.currentFile}</span>}
@@ -555,7 +575,7 @@ function JobDetails({ id, onClose, notify, refresh }) {
               <p className="ops-warning">明细记录已截断；完整重跑会重新检查并跳过已完成文件。</p>
             )}
             <div className="ops-log">
-              <table>
+              <table className="transfer-files">
                 <thead>
                   <tr>
                     <th>文件</th>
@@ -563,7 +583,7 @@ function JobDetails({ id, onClose, notify, refresh }) {
                     <th>状态</th>
                     <th>大小</th>
                     <th>进度 / 检查</th>
-                    <th>错误</th>
+                    <th>原因 / 错误</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -580,6 +600,8 @@ function JobDetails({ id, onClose, notify, refresh }) {
                             completed: '成功',
                             failed: '失败',
                             skipped: '跳过',
+                            checked: '已检查',
+                            stopped: '已停止',
                             deleted: '删除',
                           }[file.status]
                         }
@@ -595,7 +617,15 @@ function JobDetails({ id, onClose, notify, refresh }) {
                               directory: '目标是目录',
                             }[file.check] || '—'}
                       </td>
-                      <td>{file.error || '—'}</td>
+                      <td>
+                        {file.reason || file.error || '—'}
+                        {file.rawError && file.rawError !== (file.reason || file.error) && (
+                          <details className="transfer-diagnostic">
+                            <summary>技术记录</summary>
+                            <p>{file.rawError}</p>
+                          </details>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
