@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createPanel } from '../server/app.mjs';
+import { Client115 } from '../server/direct115.mjs';
 
 const binary = process.env.RCLONE_BIN || 'rclone';
 const installed = spawnSync(binary, ['version']).status === 0;
@@ -180,5 +181,132 @@ test(
       '电影 & 字幕.txt',
     );
     await call('/direct115', 'POST', { name: 'team-group', cookie: ck }, 409);
+  },
+);
+
+test(
+  '直接115特殊名称经真实rclone浏览、递归复制，转义字面名称不会串文件',
+  { skip: !installed, timeout: 60000 },
+  async (t) => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), 'cloudreel-115-names-'));
+    const root = path.join(fixture, 'files');
+    const names = [
+      ['Re:Zero.txt', 'Re%3AZero.txt'],
+      ['Re%3AZero.txt', 'Re%253AZero.txt'],
+      ['a\\b.txt', 'a%5Cb.txt'],
+      ['a%5Cb.txt', 'a%255Cb.txt'],
+      ['line\n.txt', 'line%0A.txt'],
+      ['动画 & <字幕> 😀.txt', '动画 & <字幕> 😀.txt'],
+      ['100%.txt', '100%25.txt'],
+      ['.', '%2E'],
+      ['..', '%2E%2E'],
+      ['%2E', '%252E'],
+    ];
+    const contents = new Map();
+    const entries = names.map(([n], i) => {
+      const pc = `pick${i + 100}`,
+        content = `unique file ${i}: ${n}\n`;
+      contents.set(pc, content);
+      return { fid: String(i + 100), n, s: Buffer.byteLength(content), pc, t: '1' };
+    });
+    contents.set('pick300', 'nested slash file\n');
+    const directories = {
+      0: [{ cid: '1', n: '电影' }],
+      1: [
+        { cid: '2', n: '动画电影' },
+        { cid: '3', n: '电影/动画电影' },
+      ],
+      2: [...entries, { cid: '20', n: 'Season:01' }],
+      3: [],
+      20: [{ fid: '300', n: 'part/one.txt', s: 18, pc: 'pick300', t: '1' }],
+    };
+    const panel = await createPanel({
+      HOST: '127.0.0.1',
+      PANEL_PASSWORD: '',
+      RCLONE_BIN: binary,
+      DATA_DIR: path.join(fixture, 'panel'),
+      LOCAL_ROOT: root,
+      RCLONE_CONFIG: path.join(fixture, 'config/rclone.conf'),
+      direct115Options: {
+        clientFactory: (cookie) => {
+          const client = new Client115(cookie, async (url) => {
+            const { searchParams } = new URL(url),
+              cid = searchParams.get('cid'),
+              data = directories[cid];
+            assert.ok(data, `unexpected directory ${cid}`);
+            return Response.json({ state: true, cid, count: data.length, offset: 0, data });
+          });
+          client.download = async (pickcode) => {
+            assert.ok(contents.has(pickcode), `unexpected pickcode ${pickcode}`);
+            const content = contents.get(pickcode);
+            return new Response(content, {
+              headers: { 'Content-Length': String(Buffer.byteLength(content)) },
+            });
+          };
+          return client;
+        },
+      },
+    });
+    const server = panel.app.listen(0, '127.0.0.1');
+    t.after(async () => {
+      await panel.close();
+      await new Promise((resolve) => server.close(resolve));
+      await rm(fixture, { recursive: true, force: true });
+    });
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    async function call(route, body) {
+      const response = await fetch(base + route, {
+        method: body ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200, `${route}: ${JSON.stringify(data)}`);
+      return data;
+    }
+    await call('/direct115', {
+      name: '115-native',
+      cookie: 'UID=123_A1; CID=synthetic-cid; SEID=synthetic-seid',
+    });
+    async function list(relative) {
+      return (await call(`/files?remote=115-native&path=${encodeURIComponent(relative)}`)).items;
+    }
+    assert.deepEqual(
+      (await list('电影')).map((item) => item.Name).sort(),
+      ['动画电影', '电影%2F动画电影'].sort(),
+    );
+    assert.deepEqual(await list('电影/电影%2F动画电影'), []);
+    assert.deepEqual(
+      (await list('电影/动画电影')).map((item) => item.Name).sort(),
+      [...names.map(([, alias]) => alias), 'Season%3A01'].sort(),
+    );
+    assert.equal((await list('电影/动画电影/Season%3A01'))[0].Name, 'part%2Fone.txt');
+    const created = await call('/jobs', {
+      source: { remote: '115-native', path: '电影/动画电影' },
+      destination: { remote: 'local', path: 'download' },
+      mode: 'copy',
+    });
+    let completed;
+    for (let i = 0; i < 200; i++) {
+      await panel.tick();
+      const job = (await call('/jobs')).find((item) => item.id === created.id);
+      if (['completed', 'failed', 'blocked', 'waiting_quota'].includes(job.status)) {
+        assert.equal(job.status, 'completed', JSON.stringify(job));
+        completed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.ok(completed, 'recursive transfer completed');
+    for (const [i, [, alias]] of names.entries())
+      assert.equal(
+        await readFile(path.join(root, 'download', alias), 'utf8'),
+        contents.get(`pick${i + 100}`),
+      );
+    assert.equal(
+      await readFile(path.join(root, 'download', 'Season%3A01', 'part%2Fone.txt'), 'utf8'),
+      contents.get('pick300'),
+    );
   },
 );

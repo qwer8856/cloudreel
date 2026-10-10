@@ -12,6 +12,20 @@ const xml = (value) =>
     /[<>&"']/g,
     (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c],
   );
+export function pathName115(name) {
+  if (typeof name !== 'string' || !name) throw new AppError('115 文件名响应无效。', 502);
+  // A 115 name can contain path separators or invalid XML characters. Expose an
+  // injective, single-segment alias; lookup still uses the original file ID.
+  // Escape literal percent signs too, so "a:b" and "a%3Ab" cannot collide.
+  if (name === '.' || name === '..') return '%2E'.repeat(name.length);
+  return name.replace(/[\/\\:%\x00-\x1f\x7f\ud800-\udfff\ufffe\uffff]/gu, (char) => {
+    const code = char.charCodeAt(0);
+    return `%${code > 255 ? 'u' : ''}${code
+      .toString(16)
+      .toUpperCase()
+      .padStart(code > 255 ? 4 : 2, '0')}`;
+  });
+}
 export function cookie115(value) {
   if (typeof value !== 'string' || value.length > 16384 || /[\r\n\x00]/.test(value))
     throw new AppError('115 Cookie 格式无效。');
@@ -127,13 +141,7 @@ export class Client115 {
       if (Number(data.count) > 100000)
         throw new AppError('115 单个目录超过 100000 项，请缩小根目录。');
       for (const item of data.data) {
-        if (
-          typeof item.n !== 'string' ||
-          !item.n ||
-          /[\/\\:\x00-\x1f]/.test(item.n) ||
-          ['.', '..'].includes(item.n)
-        )
-          throw new AppError('115 目录含无法安全映射的文件名，请在官网重命名。');
+        const name = pathName115(item?.n);
         const isDir = !item.fid;
         const id = String(isDir ? item.cid : item.fid),
           size = isDir ? 0 : Number(item.s);
@@ -141,7 +149,7 @@ export class Client115 {
           throw new AppError('115 文件信息响应无效。', 502);
         files.push({
           id,
-          name: item.n,
+          name,
           isDir,
           size,
           pickcode: item.pc,

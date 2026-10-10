@@ -152,7 +152,8 @@ export function Login115Form({ remote, onBack, onClose, onDone }) {
           </div>
           <p className="ops-info">
             直接扫码和 CK 无需 OpenList，支持浏览及从 115 复制文件到其他存储；暂不支持向 115
-            上传。凭据保存在服务器，不会在网页中回显。
+            上传。凭据保存在服务器，不会在网页中回显。 特殊文件名会转换为可访问的名称（例如冒号变为
+            %3A），复制后使用显示名称，115 原文件不改名。
           </p>
           <div className="cloud-field-grid">
             <label className="field">

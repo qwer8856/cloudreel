@@ -1,4 +1,4 @@
-# CloudReel 1.0.1 · 115 → Google Drive 影视传输助手
+# CloudReel 1.0.2 · 115 → Google Drive 影视传输助手
 
 [GitHub 仓库](https://github.com/qwer8856/cloudreel) · [Docker Hub 镜像](https://hub.docker.com/r/gongjuren8856/cloudreel)
 
@@ -71,7 +71,7 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 ## Linux / Docker 部署
 
-默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.1`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.2`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
 取得部署配置并准备数据目录：
 
@@ -88,7 +88,7 @@ sudo chmod 700 data/config data/panel
 ```yaml
 services:
   cloudreel:
-    image: gongjuren8856/cloudreel:1.0.1
+    image: gongjuren8856/cloudreel:1.0.2
     container_name: cloudreel
     restart: unless-stopped
     init: true
@@ -136,12 +136,12 @@ OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内
 
 升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
 
-[v1.0.1 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.1) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
+[v1.0.2 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.2) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-docker load -i cloudreel-1.0.1-linux-amd64.tar.gz
-# ARM64 服务器将上面的文件名换成 cloudreel-1.0.1-linux-arm64.tar.gz
+docker load -i cloudreel-1.0.2-linux-amd64.tar.gz
+# ARM64 服务器将上面的文件名换成 cloudreel-1.0.2-linux-arm64.tar.gz
 docker compose up -d --pull never
 ```
 
@@ -249,7 +249,9 @@ Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .e
 
 二维码图片由面板根据 115 返回的扫码内容在本地生成，不依赖 115 的独立图片接口。服务器仍须能访问 115 的登录接口；生成或图片加载失败时，网页会显示错误，可点击生成按钮重试。切换登录设备会重新生成二维码；编辑已有连接时保留现有登录，点击生成按钮才开始重新扫码。
 
-直接模式实现目录浏览、递归扫描和文件流读取，支持“115 → 本地 / Google Drive / Google group”等复制与影视任务，暂不支持向 115 上传或创建目录。内置读取桥只监听容器回环地址，无需增加端口、服务或凭据环境变量。单目录最多 100000 项，同名项目或不能映射的名称会提示在官网调整。接口依赖 115 Cookie 协议；风控、设备验证或登录失效时，在 115 官方客户端完成验证后重新登录。协议实现来源及 MIT 许可见 [第三方声明](server/THIRD_PARTY_NOTICES.md)。
+直接模式实现目录浏览、递归扫描和文件流读取，支持“115 → 本地 / Google Drive / Google group”等复制与影视任务，暂不支持向 115 上传或创建目录。内置读取桥只监听容器回环地址，无需增加端口、服务或凭据环境变量。单目录最多 100000 项，同名项目会提示在官网调整。接口依赖 115 Cookie 协议；风控、设备验证或登录失效时，在 115 官方客户端完成验证后重新登录。协议实现来源及 MIT 许可见 [第三方声明](server/THIRD_PARTY_NOTICES.md)。
+
+任务目录填写相对于连接根目录的路径，例如 `电影/动画电影` 表示两级目录，不填写目录 ID；也可以用浏览按钮选择。115 原名称中的英文冒号、斜杠、反斜杠、控制字符等会转换为安全名称，例如 `Re:Zero.mkv` 显示为 `Re%3AZero.mkv`，字面 `%` 显示为 `%25`；名称恰为 `.` / `..` 时显示为 `%2E` / `%2E%2E`。普通中文和 emoji 保持原样。浏览和任务路径使用页面显示的名称，复制后的名称也与页面一致，115 上的原文件不改名。不同原名称不会因转换而碰撞；目录不会因为某个特殊名称而整体无法读取。
 
 `data/panel/state.json` 保存直接 115 的 Cookie，须与 `data/config` 一起保管。完整加密备份包含直接连接、Google group 和用量记录。
 

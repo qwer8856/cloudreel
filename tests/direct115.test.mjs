@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Client115, Direct115, cookie115, downloadHost115 } from '../server/direct115.mjs';
+import {
+  Client115,
+  Direct115,
+  cookie115,
+  downloadHost115,
+  pathName115,
+} from '../server/direct115.mjs';
+import { cleanPath } from '../server/validation.mjs';
 import { encode115, decode115 } from '../server/115-cipher.mjs';
 import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
@@ -67,6 +74,60 @@ test('115 目录分页映射目录、文件及特殊字符，拒绝同名和目�
     }),
   );
   await assert.rejects(() => duplicate.list('0'), /同名/);
+});
+
+test('115 特殊名称映射为独立路径段，保留中文和 emoji 且不与字面转义名称碰撞', async () => {
+  const cases = [
+    ['动画电影 & <字幕> 😀.mkv', '动画电影 & <字幕> 😀.mkv'],
+    ['电影/动画电影', '电影%2F动画电影'],
+    ['Re:Zero.mkv', 'Re%3AZero.mkv'],
+    ['Re%3AZero.mkv', 'Re%253AZero.mkv'],
+    ['a\\b.txt', 'a%5Cb.txt'],
+    ['a%5Cb.txt', 'a%255Cb.txt'],
+    ['.', '%2E'],
+    ['..', '%2E%2E'],
+    ['%2E', '%252E'],
+    ['%2E%2E', '%252E%252E'],
+    ['line\n\0\x7f.txt', 'line%0A%00%7F.txt'],
+    ['bad\ud800\ufffe\uffff.txt', 'bad%uD800%uFFFE%uFFFF.txt'],
+    ['bad%uD800%uFFFE%uFFFF.txt', 'bad%25uD800%25uFFFE%25uFFFF.txt'],
+    ['100%.txt', '100%25.txt'],
+  ];
+  const client = new Client115(ck, async () =>
+    Response.json({
+      state: true,
+      cid: '0',
+      count: cases.length,
+      data: cases.map(([n], i) => ({ fid: String(i + 1), n, s: 1, pc: `pick${i}` })),
+    }),
+  );
+  const files = await client.list('0');
+  assert.deepEqual(
+    files.map((file) => file.name),
+    cases.map(([, alias]) => alias),
+  );
+  assert.equal(new Set(files.map((file) => file.name)).size, cases.length);
+  for (const [name, alias] of cases) {
+    assert.equal(pathName115(name), alias);
+    assert.equal(cleanPath(alias), alias);
+    assert.equal(alias.includes('/'), false);
+    assert.equal(decodeURIComponent(encodeURIComponent(alias)), alias);
+  }
+  // Mapping names must not relax the application-wide path traversal checks.
+  for (const value of ['../outside', './file', 'a:b', 'a\\b'])
+    assert.throws(() => cleanPath(value));
+});
+
+test('115 缺失、空名称或非字符串文件名字段仍作为上游响应错误处理，不跳过文件', async () => {
+  for (const item of [null, {}, { n: '' }, { n: 42 }]) {
+    const client = new Client115(ck, async () =>
+      Response.json({ state: true, cid: '0', count: 1, data: [item] }),
+    );
+    await assert.rejects(() => client.list('0'), {
+      status: 502,
+      message: '115 文件名响应无效。',
+    });
+  }
 });
 
 test('115 原生桥只监听回环，WebDAV XML编码、范围读取、拒绝写入、凭据不回显', async (t) => {

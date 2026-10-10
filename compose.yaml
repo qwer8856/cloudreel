@@ -2,7 +2,7 @@
 # 无需 .env，也不要挂载 .env 或使用 env_file 注入工具凭据。
 services:
   cloudreel:
-    image: gongjuren8856/cloudreel:1.0.1
+    image: gongjuren8856/cloudreel:1.0.2
     container_name: cloudreel
     restart: unless-stopped
     init: true
