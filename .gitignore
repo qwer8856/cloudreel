@@ -1,0 +1,17 @@
+node_modules/
+dist/
+data/
+.env
+.env.*
+!.env.example
+rclone.conf
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+*.tar
+*.tar.gz
+*.zip
+*.log
+coverage/

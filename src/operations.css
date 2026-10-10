@@ -1,0 +1,199 @@
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.ops-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.ops-toolbar strong {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.ops-panel {
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.ops-panel h3 {
+  margin: 0 0 10px;
+}
+.ops-panel .field {
+  min-width: 0;
+}
+.ops-panel p,
+.transfer-controls p {
+  line-height: 1.7;
+}
+.ops-panel .field input,
+.ops-panel select,
+.transfer-controls textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.transfer-controls {
+  margin: 20px 0;
+  padding: 18px;
+  border: 1px solid var(--border, #e3e9e5);
+  border-radius: 12px;
+}
+.transfer-controls details summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin: 12px 0;
+}
+.transfer-controls textarea {
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  resize: vertical;
+}
+.file-picker {
+  border: 1px solid #dce4df;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.transfer-directory-note {
+  margin: 0;
+  font-size: 12px;
+  color: #64776c;
+}
+.picker-path-row,
+.picker-create-directory {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 14px 0;
+}
+.picker-path-row .field,
+.picker-create-directory .field {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.picker-path-row .button,
+.picker-create-directory .button {
+  flex-shrink: 0;
+}
+.picker-create-directory {
+  padding-top: 14px;
+  border-top: 1px solid #e5ebe7;
+}
+.picker-list {
+  max-height: 280px;
+  overflow: auto;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #eef1ef;
+}
+.picker-row input {
+  flex: 0 0 auto;
+  width: 16px;
+}
+.picker-name {
+  flex: 1;
+  text-align: left;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ops-warning {
+  background: #fff8e6;
+  border: 1px solid #eddcb0;
+  color: #785919;
+  padding: 14px;
+  border-radius: 9px;
+  margin: 12px 0;
+}
+.ops-info {
+  background: #edf7f2;
+  padding: 14px;
+  border-radius: 9px;
+  margin: 12px 0;
+}
+.block {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 5px;
+}
+.ops-account-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ops-account-header h3 {
+  margin: 0;
+}
+.ops-account-header .muted {
+  font-size: 12px;
+}
+.ops-log {
+  max-height: 360px;
+  overflow: auto;
+  margin: 14px 0;
+}
+.ops-log table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ops-log th,
+.ops-log td {
+  padding: 9px;
+  text-align: left;
+  border-bottom: 1px solid #e5ebe7;
+  overflow-wrap: anywhere;
+  max-width: 300px;
+}
+.ops-log pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f5f8f6;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.status-badge.queued,
+.status-badge.retry_wait,
+.status-badge.waiting_quota {
+  color: #a3741a;
+  background: #fff7e7;
+}
+.status-badge.paused,
+.status-badge.blocked {
+  color: #757882;
+  background: #f0f1f4;
+}
+.ops-muted {
+  color: #737e78;
+  font-size: 12px;
+}
+@media (max-width: 680px) {
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+  .ops-panel {
+    padding: 17px;
+  }
+  .transfer-controls {
+    padding: 12px;
+  }
+  .ops-toolbar .button {
+    font-size: 12px;
+  }
+  .picker-path-row,
+  .picker-create-directory {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

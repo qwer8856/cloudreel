@@ -1,0 +1,32 @@
+{
+  "name": "cloudreel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"node --watch server/index.mjs\" \"vite --host 127.0.0.1\"",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "test": "node --import ./tests/setup.mjs --test tests/*.test.mjs",
+    "version:next": "node scripts/version.mjs",
+    "version:bump": "node scripts/version.mjs --write",
+    "format": "prettier --write src server tests vite.config.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^10.0.6",
+    "prettier": "^3.9.9",
+    "simple-icons": "^16.34.0",
+    "vite": "^7.1.9"
+  }
+}

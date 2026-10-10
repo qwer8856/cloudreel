@@ -1,0 +1,43 @@
+name: CloudReel CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-fund --no-audit
+      - name: Install verified rclone
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLO https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip
+          curl -fsSLo SHA256SUMS https://downloads.rclone.org/v1.75.1/SHA256SUMS
+          rg ' [*]?rclone-v1[.]75[.]1-linux-amd64[.]zip$' SHA256SUMS | sha256sum --check --strict -
+          unzip -q rclone-v1.75.1-linux-amd64.zip
+      - name: Test
+        run: npm test
+        env:
+          RCLONE_BIN: ${{ runner.temp }}/rclone-v1.75.1-linux-amd64/rclone
+      - name: Build
+        run: npm run build
+      - name: Check formatting
+        run: npx prettier --check src server scripts tests vite.config.mjs README.md VERIFICATION.md
+      - name: Check Compose
+        run: docker compose config --quiet
+        env:
+          PANEL_PASSWORD: synthetic-ci-check-password
+          OPENLIST_ADMIN_PASSWORD: synthetic-openlist-ci-password

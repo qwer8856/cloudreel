@@ -1,0 +1,146 @@
+.cloud-section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--accent);
+  margin-bottom: 22px;
+}
+.cloud-section-heading h3 {
+  margin: 0 0 7px;
+  color: var(--text);
+  font-size: 15px;
+}
+.cloud-section-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.cloud-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+.cloud-modal .field {
+  margin-bottom: 20px;
+}
+.cloud-login-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 5px;
+  background: #f3f6f4;
+  border-radius: 10px;
+  margin: 2px 0 22px;
+}
+.cloud-login-tabs button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cloud-login-tabs button.selected {
+  color: var(--accent);
+  background: white;
+  box-shadow: 0 1px 4px #20372d12;
+  font-weight: 600;
+}
+.cloud-login-tabs button:disabled {
+  cursor: default;
+}
+.cloud-service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f1f7f3;
+  border: 1px solid #e1eae4;
+  border-radius: 9px;
+  padding: 12px 15px;
+  margin-bottom: 24px;
+  font-size: 12px;
+}
+.cloud-service-row > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.cloud-help,
+.cloud-auth-help {
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+.cloud-auth-help a,
+.cloud-setup-actions a {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 6px;
+}
+.cloud-setup-actions,
+.cloud-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 25px;
+}
+.cloud-setup-actions a {
+  font-size: 12px;
+  margin-left: 0;
+}
+.cloud-form-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 22px;
+}
+.cloud-success,
+.cloud-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.cloud-sms-step {
+  border: 1px solid #e1eae4;
+  background: #fafcfb;
+  border-radius: 9px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+.cloud-sms-step > button {
+  margin-bottom: 18px;
+}
+.cloud-sms-step .field {
+  margin-bottom: 0;
+}
+.openlist-settings-panel {
+  padding: 26px;
+  margin-top: 22px;
+}
+.cloud-transfer-hint {
+  margin-bottom: 20px;
+}
+@media (max-width: 600px) {
+  .cloud-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cloud-setup-actions {
+    flex-wrap: wrap;
+  }
+  .cloud-setup-actions .button {
+    width: 100%;
+  }
+  .openlist-settings-panel {
+    padding: 20px;
+  }
+}
