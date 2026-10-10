@@ -1,39 +1,14 @@
+# 只设置部署项；面板密码、存储连接和通知均在网页配置。
+# 无需 .env，也不要挂载 .env 或使用 env_file 注入工具凭据。
 services:
   cloudreel:
-    build: .
-    image: ${CLOUDREEL_IMAGE:-gongjuren8856/cloudreel:1.0.0}
+    image: gongjuren8856/cloudreel:1.0.1
     container_name: cloudreel
     restart: unless-stopped
     init: true
     ports:
-      - '${PANEL_PORT:-8787}:8787'
-    environment:
-      PANEL_PASSWORD: ${PANEL_PASSWORD:?请先在 .env 中设置至少 12 位 PANEL_PASSWORD}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      TZ: Asia/Shanghai
-      OPENLIST_URL: http://openlist:5244
-      OPENLIST_ADMIN_USER: admin
-      OPENLIST_ADMIN_PASSWORD: ${OPENLIST_ADMIN_PASSWORD:?请在 .env 中设置 OpenList 的独立管理员密码}
-    depends_on:
-      openlist:
-        condition: service_healthy
+      - '8787:8787'
     volumes:
       - ./data/config:/data/config
       - ./data/panel:/data/panel
       - ./data/files:/data/files
-  openlist:
-    image: openlistteam/openlist:v4.2.6
-    restart: unless-stopped
-    environment:
-      OPENLIST_ADMIN_PASSWORD: ${OPENLIST_ADMIN_PASSWORD:?请在 .env 中设置 OpenList 的独立管理员密码}
-      TZ: Asia/Shanghai
-      UMASK: '077'
-    volumes:
-      - ./data/openlist:/opt/openlist/data
-    # OpenList 只在 Compose 网络内访问，网盘管理和登录由面板完成。
-    healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:5244/api/public/settings']
-      interval: 10s
-      timeout: 5s
-      start_period: 20s
-      retries: 6

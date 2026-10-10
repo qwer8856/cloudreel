@@ -186,7 +186,13 @@ export function finishSchedule(schedule, job, status) {
   if (job.stopReason === 'rollover') reason = 'rollover';
   else if (job.stopReason === 'shutdown') reason = 'interrupted';
   else if (job.stopping) reason = 'paused';
-  else if (/max transfer limit|transfer limit reached/i.test(error)) reason = 'bytes_limit';
+  else if (/max transfer limit|transfer limit reached/i.test(error))
+    reason =
+      job.driveCapacity != null &&
+      job.driveCapacity === job.limits?.bytes &&
+      (!schedule.dailyBytes || day.bytes < schedule.dailyBytes)
+        ? 'interrupted'
+        : 'bytes_limit';
   else if (/max duration|duration limit/i.test(error)) reason = 'time_limit';
   else if (
     !status.success &&

@@ -44,10 +44,10 @@ const fields = {
 };
 const secret = (key) => /cookie|password|secret|token|verify_code|device_sign/.test(key);
 
-export function OpenListSetup({ initial, onConnected }) {
+export function OpenListSetup({ initial, onConnected, onSkip, skipLabel }) {
   const [config, setConfig] = useState(initial || null);
   const [values, setValues] = useState({
-    url: initial?.url || 'http://openlist:5244',
+    url: initial?.url || '',
     username: initial?.username || 'admin',
     auth: initial?.tokenSaved ? 'token' : 'password',
     password: '',
@@ -78,6 +78,10 @@ export function OpenListSetup({ initial, onConnected }) {
       active = false;
     };
   }, [initial]);
+  const sameService = values.url.trim().replace(/\/+$/, '') === config?.url;
+  const passwordSaved =
+    sameService && values.username.trim() === config?.username && config?.passwordSaved;
+  const tokenSaved = sameService && config?.tokenSaved;
   const change = (key, value) => setValues((old) => ({ ...old, [key]: value }));
   async function submit(event) {
     event.preventDefault();
@@ -101,8 +105,11 @@ export function OpenListSetup({ initial, onConnected }) {
       <div className="cloud-section-heading">
         <Server size={20} />
         <div>
-          <h3>OpenList 网盘服务</h3>
-          <p>一次连接，为 115、光鸭和 123 提供统一的传输入口。</p>
+          <h3>可选：连接 OpenList 网盘服务</h3>
+          <p>
+            光鸭、123 和 115 的 OpenList 模式需要此服务。115 直接扫码 / CK、Google Drive、WebDAV、S3
+            无需 OpenList。
+          </p>
         </div>
       </div>
       <div className="cloud-field-grid">
@@ -112,11 +119,15 @@ export function OpenListSetup({ initial, onConnected }) {
             aria-label="OpenList 服务地址"
             required
             type="url"
+            placeholder="例如 https://openlist.example.com"
             value={values.url}
             disabled={config?.locked || busy}
             onChange={(e) => change('url', e.target.value)}
           />
-          <small>Docker 配套服务使用 http://openlist:5244；其他实例填写服务器可访问的地址。</small>
+          <small>
+            填写 CloudReel 服务器能访问的 OpenList 地址，例如 http://192.168.1.10:5244 或
+            https://openlist.example.com。
+          </small>
         </label>
         <label className="field">
           <span>管理员授权方式</span>
@@ -146,15 +157,11 @@ export function OpenListSetup({ initial, onConnected }) {
               <span>管理员密码</span>
               <input
                 aria-label="OpenList 管理员密码"
-                required={!config?.passwordSaved}
+                required={!passwordSaved}
                 type="password"
                 autoComplete="new-password"
                 value={values.password}
-                placeholder={
-                  config?.passwordSaved
-                    ? '已保存，留空保留'
-                    : '部署时设置的 OPENLIST_ADMIN_PASSWORD'
-                }
+                placeholder={passwordSaved ? '已保存，留空保留' : '输入现有 OpenList 的管理员密码'}
                 onChange={(e) => change('password', e.target.value)}
               />
             </label>
@@ -179,9 +186,9 @@ export function OpenListSetup({ initial, onConnected }) {
               aria-label="OpenList API Token"
               type="password"
               autoComplete="new-password"
-              required={!config?.tokenSaved}
+              required={!tokenSaved}
               value={values.adminToken}
-              placeholder={config?.tokenSaved ? '已保存，留空保留' : 'OpenList 管理后台中的 Token'}
+              placeholder={tokenSaved ? '已保存，留空保留' : 'OpenList 管理后台中的 Token'}
               onChange={(e) => change('adminToken', e.target.value)}
             />
           </label>
@@ -210,6 +217,15 @@ export function OpenListSetup({ initial, onConnected }) {
           {busy ? <Spinner /> : <Check size={16} />}保存并连接
         </button>
       </div>
+      {onSkip && (
+        <div className="cloud-skip-service">
+          <p>暂不使用 OpenList？可返回选择 115 直接扫码 / CK、Google Drive 或其他存储。</p>
+          <button type="button" className="text-button" disabled={busy} onClick={onSkip}>
+            <ArrowLeft size={14} />
+            {skipLabel || '暂不使用，返回选择存储'}
+          </button>
+        </div>
+      )}
     </form>
   );
 }
@@ -374,6 +390,8 @@ export function CloudForm({ type, remote, onBack, onClose, onDone }) {
             {setup ? (
               <OpenListSetup
                 initial={service}
+                onSkip={current ? onClose : onBack}
+                skipLabel={current ? '暂不修改，关闭' : undefined}
                 onConnected={(data) => {
                   setService(data);
                   setSetup(false);
@@ -593,6 +611,8 @@ export function TransferHint({ remotes, source, destination }) {
           '网盘互传会经由部署服务器读取和上传，占用服务器带宽，可在运行设置中限速。'}
         {target?.capabilities?.overwrite === false &&
           ' 光鸭作为目标时请选择复制；已有同名文件自动跳过。'}
+        {target?.type === 'drive-group' &&
+          ' Google group 按账号硬预算停止；中断的大文件可能需要重传，请为单个文件留出足够预算。'}
       </p>
     </div>
   );

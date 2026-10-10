@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'node:path';
-import { randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   mkdir,
   readFile,
@@ -19,6 +19,9 @@ import { Notifications } from './notifications.mjs';
 import { Backups } from './backup.mjs';
 import { MediaRunner } from './media-runner.mjs';
 import { mediaEnabled } from './media.mjs';
+import { openAuthentication } from './auth.mjs';
+import { Direct115 } from './direct115.mjs';
+import { DriveGroups } from './drive-groups.mjs';
 import {
   account,
   calendar,
@@ -42,16 +45,12 @@ import {
 
 const DEFAULTS = { transfers: 4, checkers: 8, retries: 3, bandwidth: '' };
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const hash = (text) => createHash('sha256').update(text).digest();
 
 export async function createPanel(options = {}) {
   const clock = typeof options.now === 'function' ? options.now : Date.now;
   const env = { ...process.env, ...options };
   const host = env.HOST || '127.0.0.1';
-  const password = env.PANEL_PASSWORD || '';
   const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
-  if (!loopback && password.length < 12)
-    throw new Error('非本机监听必须设置至少 12 位 PANEL_PASSWORD。');
   const dataDir = path.resolve(env.DATA_DIR || './data/panel');
   const localRoot = path.resolve(env.LOCAL_ROOT || './data/files');
   const config = path.resolve(env.RCLONE_CONFIG || './data/config/rclone.conf');
@@ -59,6 +58,12 @@ export async function createPanel(options = {}) {
     mkdir(dataDir, { recursive: true, mode: 0o700 }),
     mkdir(localRoot, { recursive: true }),
   ]);
+  const authentication = await openAuthentication(
+    dataDir,
+    env.PANEL_PASSWORD || '',
+    loopback ? 1 : 12,
+  );
+  const setupRequired = () => !loopback && !authentication.configured;
   const stateFile = path.join(dataDir, 'state.json');
   let state = { settings: { ...DEFAULTS }, jobs: [], pending: {}, schedules: [] };
   try {
@@ -138,17 +143,20 @@ export async function createPanel(options = {}) {
     const [configs, providers] = await Promise.all([dump(), engine.providers()]);
     const list = Object.entries(configs)
       .filter(([name]) => !cloudRecord(name))
-      .map(([name, config]) =>
-        sanitizeRemote(
+      .map(([name, config]) => ({
+        ...sanitizeRemote(
           name,
           config,
           providers.find((provider) => provider.Name === config.type),
           state.pending[name],
         ),
-      );
+        teamDriveConfigured: config.type === 'drive' && Boolean(config.team_drive),
+      }));
     return [
       ...list,
       ...Object.values(state.cloudRemotes).map((record) => cloud.remoteView(record)),
+      ...Object.values(state.direct115Remotes || {}).map((record) => direct115.view(record)),
+      ...(state.driveGroups || []).map((group) => driveGroups.remoteView(group)),
     ].map((remote) => ({
       ...remote,
       accountLabel: operations.policy(remote.name).label,
@@ -157,12 +165,22 @@ export async function createPanel(options = {}) {
     }));
   }
   const cloud = new OpenListConnector({ state, save, engine, backup, env });
+  const direct115 = new Direct115({ state, save, now: clock, ...options.direct115Options });
+  await direct115.start();
+  const driveGroups = new DriveGroups({
+    state,
+    save,
+    engine,
+    now: clock,
+    ...options.driveGroupOptions,
+  });
   const notifications = new Notifications({ state, save, now: clock });
   const operations = new Operations({
     state,
     save,
     engine,
     cloud,
+    driveGroups,
     dataDir,
     now: clock,
     resolveFs,
@@ -180,7 +198,7 @@ export async function createPanel(options = {}) {
       return notifications.enqueue(event, job);
     },
   });
-  const backups = new Backups({ state, save, cloud, engine, config, dataDir });
+  const backups = new Backups({ state, save, cloud, direct115, engine, config, dataDir });
   const media = new MediaRunner({
     engine,
     resolveFs,
@@ -194,6 +212,8 @@ export async function createPanel(options = {}) {
   const verificationTasks = new Set();
   await save();
   function freeRemote(name, schedules = false) {
+    if (driveGroups.member(name))
+      throw new AppError('该账号属于 Google group，请先从 group 移除后再修改或删除连接。', 409);
     if (
       state.jobs.some(
         (job) =>
@@ -256,14 +276,22 @@ export async function createPanel(options = {}) {
     return parameters;
   }
   async function requireRemote(name) {
+    if (direct115.record(name)) return { type: 'direct-115' };
+    if (driveGroups.record(name)) return { type: 'drive-group' };
     const configs = await dump();
     if (!Object.hasOwn(configs, name)) throw new AppError('存储配置不存在。', 404);
     if (cloudRecord(name)) cloud.assertConfig(cloudRecord(name), configs[name]);
     return configs[name];
   }
-  async function resolveFs(endpoint) {
+  async function resolveFs(endpoint, job) {
     if (!endpoint || typeof endpoint.remote !== 'string') throw new AppError('请选择存储。');
     const relative = cleanPath(endpoint.path);
+    if (direct115.record(endpoint.remote))
+      return { fs: direct115.fs(endpoint.remote, relative), key: endpoint.remote, path: relative };
+    if (driveGroups.record(endpoint.remote)) {
+      const target = await resolveFs(driveGroups.endpoint(endpoint, job));
+      return { ...target, key: driveGroups.targetKey(endpoint.remote) };
+    }
     if (
       cloudRecord(endpoint.remote)?.phase !== undefined &&
       cloudRecord(endpoint.remote).phase !== 'ready'
@@ -282,7 +310,11 @@ export async function createPanel(options = {}) {
         path: relative,
       };
     }
-    return { fs: `${endpoint.remote}:${relative}`, key: endpoint.remote, path: relative };
+    return {
+      fs: `${endpoint.remote}${driveGroups.member(endpoint.remote) ? ',stop_on_upload_limit=true' : ''}:${relative}`,
+      key: driveGroups.targetKey(endpoint.remote),
+      path: relative,
+    };
   }
 
   async function transferEndpoints(input) {
@@ -293,12 +325,16 @@ export async function createPanel(options = {}) {
     if (input.mode === 'sync' && input.dryRun !== true && input.confirmDelete !== true)
       throw new AppError('同步会删除目标多余文件，请确认后再运行。');
     const target = cloudRecord(input.destination?.remote);
+    if (direct115.record(input.destination?.remote))
+      throw new AppError('115 直接连接暂仅支持读取，请选择其他上传目标。');
+    if (driveGroups.record(input.destination?.remote) && input.mode !== 'copy')
+      throw new AppError('Google group 仅支持复制，请选择复制模式。');
     if (target?.capabilities?.upload === false) throw new AppError('目标网盘驱动不支持上传。');
     if (input.mode === 'sync' && target?.capabilities?.overwrite === false)
       throw new AppError('光鸭不支持同名覆盖，作为目标时请使用复制；已有同名文件会自动跳过。');
     const [source, destination] = await Promise.all([
       resolveFs(input.source),
-      resolveFs(input.destination),
+      resolveFs(input.destination, input),
     ]);
     const overlaps = (a, b) => a === b || !a || b.startsWith(`${a}/`);
     if (
@@ -329,6 +365,15 @@ export async function createPanel(options = {}) {
     const day = schedule ? usage(schedule, local.date, true) : null;
     const limits = operations.limits(queued || input, schedule);
     const mediaMode = mediaEnabled(input);
+    if (
+      !mediaMode &&
+      !dryRun &&
+      input.driveMaxFileBytes &&
+      (await operations.filesFor(input)).some((file) => file.Size > input.driveMaxFileBytes)
+    )
+      throw new AppError(
+        '文件超过 Google group 所有账号的单次预算，请提高账号预算或调整来源文件。',
+      );
     const filter = mediaMode ? null : await operations.prepareFilter(queued || input);
     const createdAt = new Date().toISOString();
     const result = mediaMode
@@ -351,7 +396,10 @@ export async function createPanel(options = {}) {
             Checkers: state.settings.checkers,
             Retries: state.settings.retries,
             DryRun: dryRun,
-            ...(cloudRecord(input.source.remote) || cloudRecord(input.destination.remote)
+            ...(cloudRecord(input.source.remote) ||
+            cloudRecord(input.destination.remote) ||
+            driveGroups.record(input.destination.remote) ||
+            driveGroups.member(input.destination.remote)
               ? { DisableFeatures: ['Copy', 'Move'] }
               : {}),
             ...(cloudRecord(input.destination.remote)?.capabilities?.overwrite === false
@@ -453,7 +501,11 @@ export async function createPanel(options = {}) {
   });
   app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    if (!password && !/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.get('host') || ''))
+    if (
+      loopback &&
+      !authentication.configured &&
+      !/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.get('host') || '')
+    )
       return res.status(403).json({ error: '本机模式仅允许通过 localhost 访问。' });
     if (!['GET', 'HEAD'].includes(req.method)) {
       if (!req.is('application/json')) return res.status(415).json({ error: '请使用 JSON 请求。' });
@@ -477,7 +529,10 @@ export async function createPanel(options = {}) {
   const sessions = new Map();
   const attempts = new Map();
   const sessionDuration = 12 * 60 * 60 * 1000;
-  const cookieSecure = env.COOKIE_SECURE === 'true';
+  const cookieSecure = (req) =>
+    env.COOKIE_SECURE === 'true' ||
+    (env.COOKIE_SECURE !== 'false' &&
+      (req.secure || req.get('x-forwarded-proto')?.toLowerCase() === 'https'));
   function token(req) {
     const value = (req.get('cookie') || '')
       .split(';')
@@ -485,14 +540,25 @@ export async function createPanel(options = {}) {
     return value?.trim().slice('studio_session='.length) || '';
   }
   function authenticated(req) {
-    if (!password) return true;
+    if (setupRequired()) return false;
+    if (!authentication.configured) return true;
     const expires = sessions.get(token(req));
     return Boolean(expires && expires > Date.now());
   }
   app.get('/api/session', (req, res) =>
-    res.json({ authenticated: authenticated(req), passwordRequired: Boolean(password) }),
+    res.json({
+      authenticated: authenticated(req),
+      passwordRequired: authentication.configured || setupRequired(),
+      setupRequired: setupRequired(),
+    }),
   );
-  app.post('/api/login', (req, res) => {
+  let authQueue = Promise.resolve();
+  function serializeAuthentication(action) {
+    const next = authQueue.catch(() => {}).then(action);
+    authQueue = next;
+    return next;
+  }
+  function limitAuthentication(req) {
     const key = req.ip;
     const now = Date.now();
     const record = attempts.get(key) || { count: 0, until: now + 5 * 60 * 1000 };
@@ -500,36 +566,65 @@ export async function createPanel(options = {}) {
       record.count = 0;
       record.until = now + 5 * 60 * 1000;
     }
-    if (record.count >= 10)
-      return res.status(429).json({ error: '登录尝试过多，请在 5 分钟后重试。' });
-    if (
-      typeof req.body?.password !== 'string' ||
-      !timingSafeEqual(hash(req.body.password), hash(password))
-    ) {
-      record.count++;
-      attempts.set(key, record);
-      return res.status(401).json({ error: '面板密码不正确。' });
-    }
-    attempts.delete(key);
+    if (record.count >= 10) throw new AppError('登录尝试过多，请在 5 分钟后重试。', 429);
+    record.count++;
+    attempts.set(key, record);
+  }
+  function createSession(req, res) {
+    const now = Date.now();
     for (const [key, expires] of sessions) if (expires < now) sessions.delete(key);
     const id = randomBytes(32).toString('hex');
     sessions.set(id, now + sessionDuration);
     res.cookie('studio_session', id, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: cookieSecure,
+      secure: cookieSecure(req),
       maxAge: sessionDuration,
       path: '/',
     });
     res.json({ authenticated: true });
+  }
+  app.post('/api/setup', async (req, res) => {
+    await serializeAuthentication(async () => {
+      if (authentication.configured) throw new AppError('面板已完成初始化，请直接登录。', 409);
+      limitAuthentication(req);
+      await authentication.replace(req.body?.password);
+      attempts.delete(req.ip);
+      createSession(req, res);
+    });
   });
-  app.use('/api', (req, res, next) =>
-    authenticated(req) ? next() : res.status(401).json({ error: '请先登录面板。' }),
-  );
+  app.post('/api/login', async (req, res) => {
+    await serializeAuthentication(async () => {
+      limitAuthentication(req);
+      const localWithoutPassword =
+        loopback && !authentication.configured && req.body?.password === '';
+      if (!localWithoutPassword && !(await authentication.verify(req.body?.password)))
+        throw new AppError(setupRequired() ? '请先设置面板密码。' : '面板密码不正确。', 401);
+      attempts.delete(req.ip);
+      createSession(req, res);
+    });
+  });
+  function requireLogin(res) {
+    return res.status(401).json({ error: '请先登录面板。', code: 'AUTH_REQUIRED' });
+  }
+  app.use('/api', (req, res, next) => (authenticated(req) ? next() : requireLogin(res)));
   app.use('/api/backups', express.json({ limit: '96mb' }));
+  app.put('/api/password', async (req, res) => {
+    await serializeAuthentication(async () => {
+      // A password change may have invalidated this request while it was queued.
+      if (!authenticated(req)) return requireLogin(res);
+      limitAuthentication(req);
+      if (!(await authentication.verify(req.body?.currentPassword)))
+        throw new AppError('当前面板密码不正确。', 401);
+      await authentication.replace(req.body?.password);
+      attempts.delete(req.ip);
+      sessions.clear();
+      createSession(req, res);
+    });
+  });
   app.post('/api/logout', (req, res) => {
     sessions.delete(token(req));
-    res.clearCookie('studio_session', { path: '/', secure: cookieSecure, sameSite: 'strict' });
+    res.clearCookie('studio_session', { path: '/', secure: cookieSecure(req), sameSite: 'strict' });
     res.json({ ok: true });
   });
   app.get('/api/status', async (req, res) => {
@@ -574,6 +669,12 @@ export async function createPanel(options = {}) {
         managed: true,
         options: [],
       })),
+      {
+        name: 'drive-group',
+        description: '同一 Google 团队盘的多个账号，独立计量并自动切换',
+        managed: true,
+        options: [],
+      },
       ...providers,
     ]);
   });
@@ -587,6 +688,87 @@ export async function createPanel(options = {}) {
     ),
   );
   app.post('/api/openlist/test', async (req, res) => res.json(await cloud.check()));
+  const nameExists = async (name) =>
+    cloudRecord(name) ||
+    direct115.record(name) ||
+    driveGroups.record(name) ||
+    Object.hasOwn(await dump(), name);
+  app.post('/api/direct115/qr', async (req, res) =>
+    res.json(await direct115.startQr(req.body.device)),
+  );
+  app.get('/api/direct115/qr/:id/image', async (req, res) => {
+    const image = await direct115.qrImage(req.params.id);
+    res.set('Cache-Control', 'no-store').type(image.type).send(image.body);
+  });
+  app.get('/api/direct115/qr/:id', async (req, res) =>
+    res.json(await direct115.qrStatus(req.params.id)),
+  );
+  app.delete('/api/direct115/qr/:id', (req, res) => {
+    direct115.qr.delete(req.params.id);
+    res.json({ ok: true });
+  });
+  app.get('/api/direct115/:name', (req, res) => {
+    const record = direct115.record(req.params.name);
+    if (!record) throw new AppError('115 连接不存在。', 404);
+    res.json(direct115.view(record));
+  });
+  app.post('/api/direct115', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        const name = remoteName(req.body.name);
+        if (await nameExists(name)) throw new AppError('该存储名称已存在。', 409);
+        return direct115.write(req.body);
+      }),
+    ),
+  );
+  app.put('/api/direct115/:name', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        freeRemote(req.params.name);
+        const result = await direct115.write(req.body, req.params.name);
+        delete state.health[req.params.name];
+        await save();
+        return result;
+      }),
+    ),
+  );
+  app.get('/api/drive-groups', (req, res) =>
+    res.json((state.driveGroups || []).map((group) => driveGroups.view(group))),
+  );
+  app.post('/api/drive-groups', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        const name = remoteName(req.body.name);
+        if (await nameExists(name)) throw new AppError('该存储名称已存在。', 409);
+        return driveGroups.write(req.body);
+      }),
+    ),
+  );
+  app.put('/api/drive-groups/:name', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        freeRemote(req.params.name);
+        const current = driveGroups.record(req.params.name);
+        if (
+          current &&
+          state.jobs.some(
+            (job) =>
+              job.status === 'running' &&
+              current.members.some((member) =>
+                [job.source.remote, job.destination.remote, job.targetRemote].includes(
+                  member.remote,
+                ),
+              ),
+          )
+        )
+          throw new AppError('请先暂停 group 成员的运行任务。', 409);
+        const result = await driveGroups.write(req.body, req.params.name);
+        delete state.health[req.params.name];
+        await save();
+        return result;
+      }),
+    ),
+  );
   app.get('/api/cloud-remotes/:name', async (req, res) =>
     res.json(await serialize(() => cloud.read(req.params.name))),
   );
@@ -594,8 +776,7 @@ export async function createPanel(options = {}) {
     res.json(
       await serialize(async () => {
         const name = remoteName(req.body.name);
-        if (cloudRecord(name) || Object.hasOwn(await dump(), name))
-          throw new AppError('该存储名称已存在。', 409);
+        if (await nameExists(name)) throw new AppError('该存储名称已存在。', 409);
         return cloud.write(req.body);
       }),
     ),
@@ -615,7 +796,7 @@ export async function createPanel(options = {}) {
         const name = remoteName(req.body.name);
         const type = req.body.type;
         const configs = await dump();
-        if (Object.hasOwn(configs, name) || cloudRecord(name))
+        if (Object.hasOwn(configs, name) || (await nameExists(name)))
           throw new AppError('该存储名称已存在。', 409);
         const parameters = await configParameters(type, req.body.parameters);
         await backup();
@@ -637,7 +818,8 @@ export async function createPanel(options = {}) {
     res.json(
       await serialize(async () => {
         const name = req.params.name;
-        if (cloudRecord(name)) throw new AppError('请使用网盘登录表单修改此连接。');
+        if (cloudRecord(name) || direct115.record(name) || driveGroups.record(name))
+          throw new AppError('请使用专用登录或 group 表单修改此连接。');
         freeRemote(name);
         const config = await requireRemote(name);
         const parameters = await configParameters(config.type, req.body.parameters);
@@ -685,6 +867,15 @@ export async function createPanel(options = {}) {
     res.json(
       await serialize(async () => {
         freeRemote(req.params.name, true);
+        if (direct115.record(req.params.name) || driveGroups.record(req.params.name)) {
+          delete state.direct115Remotes[req.params.name];
+          state.driveGroups = state.driveGroups.filter((group) => group.name !== req.params.name);
+          direct115.reset();
+          delete state.remotePolicies[req.params.name];
+          delete state.health[req.params.name];
+          await save();
+          return { ok: true };
+        }
         if (cloudRecord(req.params.name)) {
           await cloud.remove(req.params.name);
           delete state.remotePolicies[req.params.name];
@@ -728,6 +919,7 @@ export async function createPanel(options = {}) {
     res.json({ items: items.slice(0, 10000), truncated: items.length > 10000 });
   });
   app.post('/api/files/mkdir', async (req, res) => {
+    if (direct115.record(req.body.remote)) throw new AppError('115 直接连接暂仅支持读取。');
     const endpoint = await resolveFs(req.body);
     if (!cleanPath(req.body.path)) throw new AppError('请输入新建文件夹路径。');
     await engine.call('operations/mkdir', { fs: endpoint.fs, remote: '' });
@@ -856,7 +1048,9 @@ export async function createPanel(options = {}) {
           state.jobs.some(
             (job) =>
               job.status === 'running' &&
-              [job.source.remote, job.destination.remote].includes(req.params.name),
+              [job.source.remote, job.destination.remote, job.targetRemote].includes(
+                req.params.name,
+              ),
           )
         )
           throw new AppError('请先暂停使用此账号的传输。', 409);
@@ -912,6 +1106,7 @@ export async function createPanel(options = {}) {
       const budgets = [
         Number(req.body.dailyBytes) || 0,
         ...operations.groups(req.body).map((group) => group.dailyBytes),
+        driveGroups.maxFileBudget(req.body.destination.remote),
       ].filter(Boolean);
       const plan = await media.preview({
         ...req.body,
@@ -1399,12 +1594,15 @@ export async function createPanel(options = {}) {
     host,
     tick,
     operations,
+    direct115,
+    driveGroups,
     backups,
     notifications,
     async close() {
       closing = true;
       clearInterval(timer);
       clearInterval(services);
+      await authQueue.catch(() => {});
       await mutationQueue.catch(() => {});
       for (const job of state.jobs)
         if (mediaEnabled(job) && job.verification?.status === 'running') {
@@ -1426,6 +1624,7 @@ export async function createPanel(options = {}) {
         await save();
       }
       await engine.stop();
+      await direct115.close();
       await writeQueue.catch(() => {});
     },
   };

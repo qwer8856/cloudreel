@@ -6,6 +6,8 @@ import path from 'node:path';
 import { AppError, remoteName, cleanPath, validateSettings } from './validation.mjs';
 import { operationSettings, transferOptions } from './operations.mjs';
 import { validateSchedule } from './scheduling.mjs';
+import { cookie115 } from './direct115.mjs';
+import { validateDriveGroup } from './drive-groups.mjs';
 
 const scrypt = promisify(derive),
   compress = promisify(gzip),
@@ -83,6 +85,51 @@ function validatePayload(payload) {
     throw new AppError('备份内容不完整。');
   validateSettings(payload.state.settings);
   operationSettings(payload.state.operations);
+  for (const [name, record] of Object.entries(payload.state.direct115Remotes || {})) {
+    remoteName(name);
+    if (
+      record.name !== name ||
+      !/^\d{1,30}$/.test(record.rootId) ||
+      !['qr', 'cookie'].includes(record.loginMode)
+    )
+      throw new AppError('115 直接连接备份无效。');
+    cookie115(record.cookie);
+  }
+  if (payload.state.driveGroups !== undefined && !Array.isArray(payload.state.driveGroups))
+    throw new AppError('Google group 备份无效。');
+  for (const group of payload.state.driveGroups || []) {
+    validateDriveGroup(group);
+    if (
+      typeof group.teamDrive !== 'string' ||
+      !group.teamDrive ||
+      typeof group.rootId !== 'string' ||
+      !group.rootId ||
+      group.members.some(
+        (member) =>
+          !/^[a-zA-Z0-9_-]{1,128}$/.test(member.identity) ||
+          member.teamDrive !== group.teamDrive ||
+          member.rootId !== group.rootId,
+      ) ||
+      new Set(group.members.map((member) => member.identity)).size !== group.members.length
+    )
+      throw new AppError('Google group 账号备份无效。');
+  }
+  for (const account of Object.values(payload.state.driveAccounts || {})) {
+    if (
+      !Array.isArray(account.buckets) ||
+      account.buckets.length > 100 ||
+      !Number.isSafeInteger(account.cooldownUntil) ||
+      account.cooldownUntil < 0 ||
+      account.buckets.some(
+        (bucket) =>
+          !Number.isSafeInteger(bucket.bytes) ||
+          bucket.bytes < 0 ||
+          !Number.isSafeInteger(bucket.until) ||
+          !Number.isSafeInteger(bucket.hour),
+      )
+    )
+      throw new AppError('Google 用量备份无效。');
+  }
   for (const schedule of payload.state.schedules) validateSchedule(schedule);
   for (const job of payload.state.jobs) {
     transferOptions(job);
@@ -179,6 +226,11 @@ export class Backups {
     }
     for (const key of Object.keys(this.state)) delete this.state[key];
     Object.assign(this.state, restored);
+    this.state.cloudRemotes ||= {};
+    this.state.direct115Remotes ||= {};
+    this.state.driveGroups ||= [];
+    this.state.driveAccounts ||= {};
+    this.direct115?.reset();
     this.cloud.token = '';
     for (const schedule of this.state.schedules) {
       schedule.enabled = false;

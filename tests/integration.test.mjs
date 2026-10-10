@@ -17,13 +17,18 @@ test('真实 rclone 配置与文件传输', { skip: !installed, timeout: 45000 }
   await writeFile(path.join(root, 'source', '测试.txt'), 'real rclone transfer\n');
   await writeFile(path.join(root, 'target', 'keep.txt'), 'keep until sync\n');
   const options = {
-    HOST: '127.0.0.1',
+    HOST: '0.0.0.0',
     RCLONE_BIN: binary,
-    PANEL_PASSWORD: 'synthetic-test-password-only',
+    PANEL_PASSWORD: '',
+    OPENLIST_URL: '',
+    OPENLIST_ADMIN_USER: '',
+    OPENLIST_ADMIN_PASSWORD: '',
+    OPENLIST_ADMIN_TOKEN: '',
     DATA_DIR: path.join(fixture, 'panel'),
     LOCAL_ROOT: root,
     RCLONE_CONFIG: path.join(fixture, 'config', 'rclone.conf'),
   };
+  const password = 'synthetic-test-password-only';
   let panel,
     server,
     base,
@@ -46,7 +51,7 @@ test('真实 rclone 配置与文件传输', { skip: !installed, timeout: 45000 }
     return { status: response.status, data: json, response };
   }
   async function login() {
-    const result = await call('/login', 'POST', { password: options.PANEL_PASSWORD });
+    const result = await call('/login', 'POST', { password });
     assert.equal(result.status, 200);
     cookie = result.response.headers.get('set-cookie').split(';')[0];
     assert.match(result.response.headers.get('set-cookie'), /HttpOnly/i);
@@ -69,6 +74,20 @@ test('真实 rclone 配置与文件传输', { skip: !installed, timeout: 45000 }
   }
   try {
     await start();
+    await t.test('无需环境密码或 OpenList，从网页完成首次初始化', async () => {
+      assert.equal((await call('/session')).data.setupRequired, true);
+      assert.equal((await call('/providers')).status, 401);
+      const setup = await call('/setup', 'POST', { password });
+      assert.equal(setup.status, 200, JSON.stringify(setup.data));
+      const setupCookie = setup.response.headers.get('set-cookie').split(';')[0];
+      const response = await fetch(`${base}/openlist`, { headers: { Cookie: setupCookie } });
+      const service = await response.json();
+      assert.equal(service.url, '');
+      assert.equal(service.configured, false);
+      assert.equal(service.passwordSaved, false);
+      assert.equal(service.tokenSaved, false);
+      cookie = '';
+    });
     await t.test('未登录请求被拒绝，错误密码无效', async () => {
       assert.equal((await call('/remotes')).status, 401);
       assert.equal((await call('/login', 'POST', { password: 'wrong' })).status, 401);
@@ -227,6 +246,8 @@ test('真实 rclone 配置与文件传输', { skip: !installed, timeout: 45000 }
       await start();
       cookie = '';
       await login();
+      assert.equal((await call('/session')).data.setupRequired, false);
+      assert.equal((await call('/openlist')).data.configured, false);
       assert.equal((await call('/settings')).data.bandwidth, '5M');
       assert.equal((await call('/jobs')).data.length, 4);
       assert.equal((await call('/remotes/dav', 'DELETE', {})).status, 200);

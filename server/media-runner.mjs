@@ -95,8 +95,8 @@ export class MediaRunner {
     }
   }
 
-  async stat(destination, relative, hashes = false) {
-    const target = await this.resolveFs(destination);
+  async stat(destination, relative, hashes = false, job) {
+    const target = await this.resolveFs(destination, job);
     try {
       const result = await this.engine.call('operations/stat', {
         fs: target.fs,
@@ -149,6 +149,14 @@ export class MediaRunner {
 
   async start(job) {
     const plan = await this.plan(job);
+    if (
+      !job.dryRun &&
+      job.driveMaxFileBytes &&
+      plan.files.some((file) => file.size > job.driveMaxFileBytes)
+    )
+      throw new AppError(
+        '文件超过 Google group 所有账号的单次预算，请提高账号预算或调整来源文件。',
+      );
     job.files = plan.files.map((file) => ({
       ...file,
       key: randomBytes(8).toString('hex'),
@@ -229,7 +237,7 @@ export class MediaRunner {
           file.error = safeError(status.error || '文件传输失败。');
           job.mediaFailure ||= file.error;
           if (
-            /max transfer limit|transfer limit reached|max duration|duration limit|401|403|429|unauthor|登录|认证|授权|timeout|connection|network|无法连接|请求超时/i.test(
+            /max transfer limit|transfer limit reached|max duration|duration limit|uploadLimitExceeded|dailyLimitExceeded|upload limit reached|401|403|429|unauthor|登录|认证|授权|timeout|connection|network|无法连接|请求超时/i.test(
               file.error,
             )
           ) {
@@ -246,6 +254,7 @@ export class MediaRunner {
                 job.destination,
                 file.targetFile,
                 Boolean(Object.keys(file.hashes).length),
+                job,
               ),
             );
           } catch (error) {
@@ -281,6 +290,7 @@ export class MediaRunner {
             job.destination,
             file.targetFile,
             Boolean(Object.keys(file.hashes).length),
+            job,
           ),
         );
       } catch (error) {
@@ -320,7 +330,7 @@ export class MediaRunner {
       try {
         const [source, destination] = await Promise.all([
           this.resolveFs(file.source),
-          this.resolveFs(job.destination),
+          this.resolveFs(job.destination, job),
         ]);
         const result = await this.engine.call('operations/copyfile', {
           srcFs: source.fs,
@@ -373,7 +383,7 @@ export class MediaRunner {
           report.error.push(file.path);
           continue;
         }
-        const target = await this.stat(job.destination, file.targetFile, mode === 'hash');
+        const target = await this.stat(job.destination, file.targetFile, mode === 'hash', job);
         const check = comparison(
           {
             ...file,

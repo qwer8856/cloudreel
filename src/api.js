@@ -11,7 +11,11 @@ export async function api(path, options = {}) {
   }
   const data = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== '/login')
+    if (
+      response.status === 401 &&
+      !['/login', '/setup'].includes(path) &&
+      (path !== '/password' || data.code === 'AUTH_REQUIRED')
+    )
       window.dispatchEvent(new Event('studio:unauthorized'));
     const error = new Error(data.error || '请求失败。');
     error.status = response.status;
@@ -41,7 +45,7 @@ export function providerInfo(type) {
     {
       'openlist-115': {
         title: '115 网盘',
-        subtitle: 'Cookie / 官方授权',
+        subtitle: 'OpenList / 直接扫码 / 直接 CK',
         color: 'blue',
         short: '115',
       },
@@ -50,6 +54,18 @@ export function providerInfo(type) {
         subtitle: '短信 / 令牌登录',
         color: 'orange',
         short: '鸭',
+      },
+      'direct-115': {
+        title: '115 网盘',
+        subtitle: '直接扫码 / CK，无需 OpenList',
+        color: 'blue',
+        short: '115',
+      },
+      'drive-group': {
+        title: 'Google 团队盘 group',
+        subtitle: '多账号额度与自动切换',
+        color: 'green',
+        short: 'G',
       },
       'openlist-123': {
         title: '123 网盘',

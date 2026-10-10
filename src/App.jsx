@@ -953,7 +953,95 @@ function JobsPage({ jobs, status, openJob, onStop }) {
   );
 }
 
-function SettingsPage({ settings, status, onSave, notify }) {
+function PasswordSettings({ passwordRequired, onPasswordChange, notify }) {
+  const [values, setValues] = useState({ currentPassword: '', password: '', confirmation: '' });
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+    if (values.password.length < 12) {
+      setError('新密码至少需要 12 位。');
+      return;
+    }
+    if (values.password !== values.confirmation) {
+      setError('两次输入的新密码不一致。');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(passwordRequired ? '/password' : '/setup', {
+        method: passwordRequired ? 'PUT' : 'POST',
+        body: passwordRequired
+          ? { currentPassword: values.currentPassword, password: values.password }
+          : { password: values.password },
+      });
+      onPasswordChange();
+      setValues({ currentPassword: '', password: '', confirmation: '' });
+      notify(passwordRequired ? '面板密码已更新' : '面板密码已设置');
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form className="panel password-settings-panel" onSubmit={submit}>
+      <div className="panel-heading">
+        <div>
+          <h3>面板登录密码</h3>
+          <p>
+            {passwordRequired
+              ? '在网页修改密码；更新后其他已登录会话会退出。'
+              : '当前为本机免登录模式，可在这里设置密码，启用登录保护。'}
+          </p>
+        </div>
+        <ShieldCheck size={19} className="muted" />
+      </div>
+      <div className="settings-body">
+        <div className="password-fields">
+          {[
+            ['currentPassword', '当前密码', 'current-password'],
+            ['password', '新密码', 'new-password'],
+            ['confirmation', '确认新密码', 'new-password'],
+          ]
+            .filter(([key]) => passwordRequired || key !== 'currentPassword')
+            .map(([key, label, autoComplete]) => (
+              <label className="field" key={key}>
+                <span>{label}</span>
+                <input
+                  type="password"
+                  aria-label={label}
+                  autoComplete={autoComplete}
+                  required
+                  minLength={key === 'currentPassword' ? undefined : 12}
+                  maxLength={1024}
+                  value={values[key]}
+                  disabled={busy}
+                  placeholder={key === 'currentPassword' ? '输入当前密码' : '至少 12 位'}
+                  onChange={(event) => setValues((old) => ({ ...old, [key]: event.target.value }))}
+                />
+              </label>
+            ))}
+        </div>
+        {error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+      </div>
+      <footer className="settings-footer">
+        <span className="password-help">请保存好新密码，下次登录时使用。</span>
+        <button className="button primary" disabled={busy}>
+          {busy ? <Spinner /> : <ShieldCheck size={16} />}
+          {passwordRequired ? '更新密码' : '设置密码'}
+        </button>
+      </footer>
+    </form>
+  );
+}
+
+function SettingsPage({ settings, status, onSave, passwordRequired, onPasswordChange, notify }) {
   const [values, setValues] = useState(settings),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -979,7 +1067,7 @@ function SettingsPage({ settings, status, onSave, notify }) {
       <div className="page-title">
         <div>
           <h1>运行设置</h1>
-          <p>在传输速度与资源占用之间，找到适合你的节奏。</p>
+          <p>网盘连接、账号和传输参数均在网页设置，并保存在挂载的数据目录。</p>
         </div>
       </div>
       <div className="settings-layout">
@@ -1085,15 +1173,26 @@ function SettingsPage({ settings, status, onSave, notify }) {
           </div>
         </div>
       </div>
-      <section className="panel openlist-settings-panel">
+      <PasswordSettings
+        passwordRequired={passwordRequired}
+        onPasswordChange={onPasswordChange}
+        notify={notify}
+      />
+      <details className="panel openlist-settings-panel optional-service-settings">
+        <summary>可选：OpenList 网盘服务</summary>
+        <p className="optional-service-note">
+          115、光鸭和 123 当前通过 OpenList 连接；Google Drive、WebDAV、S3
+          等可直接添加存储，无需配置此项。
+        </p>
         <OpenListSetup onConnected={() => notify('OpenList 服务已连接')} />
-      </section>
+      </details>
     </>
   );
 }
 
-function Login({ onLogin }) {
+function Login({ onLogin, setupRequired = false }) {
   const [password, setPassword] = useState(''),
+    [confirmation, setConfirmation] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   return (
@@ -1116,11 +1215,22 @@ function Login({ onLogin }) {
         <form
           onSubmit={async (event) => {
             event.preventDefault();
-            setBusy(true);
             setError('');
+            if (setupRequired && password.length < 12) {
+              setError('面板密码至少需要 12 位。');
+              return;
+            }
+            if (setupRequired && password !== confirmation) {
+              setError('两次输入的密码不一致。');
+              return;
+            }
+            setBusy(true);
             try {
-              await api('/login', { method: 'POST', body: { password } });
-              onLogin();
+              const result = await api(setupRequired ? '/setup' : '/login', {
+                method: 'POST',
+                body: { password },
+              });
+              onLogin(result);
             } catch (error) {
               setError(error.message);
             } finally {
@@ -1131,27 +1241,53 @@ function Login({ onLogin }) {
           <span className="login-lock">
             <ShieldCheck size={26} />
           </span>
-          <h2>欢迎回来</h2>
-          <p>输入面板密码，进入你的存储工作台。</p>
+          <h2>{setupRequired ? '开始使用 CloudReel' : '欢迎回来'}</h2>
+          <p>
+            {setupRequired
+              ? '先设置面板登录密码，再在网页添加网盘和安排传输。'
+              : '输入面板密码，进入你的存储工作台。'}
+          </p>
           <label className="field">
             <span>面板密码</span>
             <input
               type="password"
               aria-label="面板密码"
-              autoComplete="current-password"
+              autoComplete={setupRequired ? 'new-password' : 'current-password'}
               required
+              minLength={setupRequired ? 12 : undefined}
+              maxLength={1024}
+              disabled={busy}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="输入 PANEL_PASSWORD"
+              placeholder={setupRequired ? '设置至少 12 位的密码' : '输入面板密码'}
             />
+            {setupRequired && <small>设置完成后，可在运行设置中修改。</small>}
           </label>
+          {setupRequired && (
+            <label className="field">
+              <span>确认面板密码</span>
+              <input
+                type="password"
+                aria-label="确认面板密码"
+                autoComplete="new-password"
+                required
+                minLength={12}
+                maxLength={1024}
+                disabled={busy}
+                value={confirmation}
+                onChange={(event) => setConfirmation(event.target.value)}
+                placeholder="再次输入面板密码"
+              />
+            </label>
+          )}
           {error && (
             <p role="alert" className="form-error">
               {error}
             </p>
           )}
           <button className="button primary" disabled={busy}>
-            {busy ? <Spinner /> : <ArrowRight size={17} />}进入工作台
+            {busy ? <Spinner /> : <ArrowRight size={17} />}
+            {setupRequired ? '完成设置，进入工作台' : '进入工作台'}
           </button>
           <div className="secure-note">
             <ShieldCheck size={14} />
@@ -1304,9 +1440,20 @@ export default function App() {
         <p>正在打开你的工作台…</p>
       </div>
     );
-  if (!session.authenticated)
+  if (session.setupRequired || !session.authenticated)
     return (
-      <Login onLogin={() => setSession((previous) => ({ ...previous, authenticated: true }))} />
+      <Login
+        setupRequired={Boolean(session.setupRequired)}
+        onLogin={(result) =>
+          setSession((previous) => ({
+            ...previous,
+            ...result,
+            authenticated: true,
+            passwordRequired: true,
+            setupRequired: false,
+          }))
+        }
+      />
     );
   const currentPage = pages.find((item) => item.id === page);
   return (
@@ -1504,6 +1651,15 @@ export default function App() {
               settings={settings}
               status={status}
               onSave={setSettings}
+              passwordRequired={session.passwordRequired}
+              onPasswordChange={() =>
+                setSession((previous) => ({
+                  ...previous,
+                  authenticated: true,
+                  passwordRequired: true,
+                  setupRequired: false,
+                }))
+              }
               notify={notify}
             />
           )}

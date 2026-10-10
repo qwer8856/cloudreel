@@ -36,6 +36,7 @@ import {
   Sun,
   TerminalSquare,
   Workflow,
+  Users,
 } from 'lucide-react';
 import {
   siAkamai,
@@ -70,6 +71,8 @@ const asset = (name, color) => ({ asset: name, color });
 // Protocols and virtual backends use Lucide icons that describe their function.
 export const providerIcons = {
   'openlist-115': { mark: '115', color: '#3585d3' },
+  'direct-115': { mark: '115', color: '#3585d3' },
+  'drive-group': functional(Users, '#428c79'),
   'openlist-123': { mark: '123', color: '#496ccf' },
   'openlist-guangya': functional(Sun, '#d49a32'),
   alias: functional(Link2, '#478f81'),

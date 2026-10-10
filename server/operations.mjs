@@ -95,12 +95,15 @@ export function rcloneFilter(filters = {}) {
 }
 export function failureKind(error) {
   if (
+    /429|too many requests|rateLimitExceeded|dailyLimitExceeded|rate.limit|限流|频率/i.test(error)
+  )
+    return 'rate';
+  if (
     /401|403|unauthori[sz]ed|invalid.*(?:token|cookie|credential)|(?:token|cookie).*expired|登录失效|未完成登录|认证|授权失效/i.test(
       error,
     )
   )
     return 'auth';
-  if (/429|too many requests|rate.limit|限流|频率/i.test(error)) return 'rate';
   if (
     /\b50[0-9]\b|timeout|timed out|connection|network|temporar|unexpected EOF|broken pipe|请求超时|无法连接/i.test(
       error,
@@ -226,7 +229,8 @@ export class Operations {
   }
   groups(job) {
     const ids = new Set(
-      [job.source.remote, job.destination.remote]
+      [job.source.remote, job.destination.remote, job.targetRemote]
+        .filter(Boolean)
         .map((remote) => this.policy(remote).groupId)
         .filter(Boolean),
     );
@@ -256,11 +260,17 @@ export class Operations {
     );
     if (running.length >= this.state.operations.maxJobs)
       return { status: 'queued', reason: '等待全局传输槽位' };
+    const driveGate = this.driveGroups?.gate(job, running);
+    if (driveGate) return driveGate;
     if (mediaEnabled(job)) {
       const target = cleanPath(job.destination.path);
       if (
         running.some((item) => {
-          if (!mediaEnabled(item) || item.destination.remote !== job.destination.remote)
+          if (
+            !mediaEnabled(item) ||
+            (this.driveGroups?.targetKey(item.destination.remote) || item.destination.remote) !==
+              (this.driveGroups?.targetKey(job.destination.remote) || job.destination.remote)
+          )
             return false;
           const active = cleanPath(item.destination.path);
           return (
@@ -274,7 +284,9 @@ export class Operations {
       )
         return { status: 'queued', reason: '等待目标目录的影视传输完成，避免重复写入' };
     }
-    for (const remote of new Set([job.source.remote, job.destination.remote])) {
+    for (const remote of new Set(
+      [job.source.remote, job.destination.remote, job.targetRemote].filter(Boolean),
+    )) {
       if (
         this.state.jobs.some(
           (item) =>
@@ -286,8 +298,9 @@ export class Operations {
       if (this.state.health[remote]?.status === 'auth_required')
         return { status: 'blocked', reason: `${this.policy(remote).label} 需要重新登录` };
       if (
-        running.filter((item) => [item.source.remote, item.destination.remote].includes(remote))
-          .length >= this.policy(remote).maxJobs
+        running.filter((item) =>
+          [item.source.remote, item.destination.remote, item.targetRemote].includes(remote),
+        ).length >= this.policy(remote).maxJobs
       )
         return { status: 'queued', reason: `等待 ${this.policy(remote).label} 的传输槽位` };
     }
@@ -320,6 +333,9 @@ export class Operations {
           schedule.dailyBytes - usage(schedule, calendar(this.now(), schedule.timezone).date).bytes,
         ),
       );
+    job.driveCapacity = this.driveGroups?.capacity(job) ?? null;
+    job.driveMaxFileBytes = this.driveGroups?.maxFileBudget(job.destination.remote) || 0;
+    if (job.driveCapacity !== null) capacities.push(job.driveCapacity);
     job.quotaScopes = scopes;
     job.sharedAccountedBytes = 0;
     return {
@@ -332,7 +348,9 @@ export class Operations {
           )
         : 0,
       cutoffMode:
-        schedule?.cutoffMode === 'hard' || this.groups(job).some((g) => g.cutoffMode === 'hard')
+        job.driveCapacity !== null ||
+        schedule?.cutoffMode === 'hard' ||
+        this.groups(job).some((g) => g.cutoffMode === 'hard')
           ? 'hard'
           : schedule?.cutoffMode || 'soft',
     };
@@ -381,6 +399,7 @@ export class Operations {
     const limits = [
       Number(input.dailyBytes) || 0,
       ...groups.map((group) => group.dailyBytes),
+      this.driveGroups?.maxFileBudget(input.destination.remote) || 0,
     ].filter(Boolean);
     const smallest = limits.length ? Math.min(...limits) : 0;
     const oversized = smallest ? files.filter((file) => file.Size > smallest) : [];
@@ -504,6 +523,7 @@ export class Operations {
   account(job, stats) {
     const current = Math.max(job.sharedAccountedBytes || 0, Number(stats.bytes) || 0);
     const delta = current - (job.sharedAccountedBytes || 0);
+    this.driveGroups?.accountBytes(job, delta);
     job.transferredBytes = (job.transferredBytes || 0) + delta;
     for (const scope of job.quotaScopes || []) {
       const group = this.state.quotaGroups.find((item) => item.id === scope.id);
@@ -555,6 +575,29 @@ export class Operations {
       job.status = status.success ? 'completed' : 'failed';
     const error = safeError(status.error || job.error || '');
     const kind = failureKind(error);
+    const sharedExhausted = this.groups(job).some((group) => {
+      const day = usage(group, calendar(this.now(), group.timezone).date);
+      return day.bytes >= group.dailyBytes;
+    });
+    if (
+      !status.success &&
+      this.driveGroups?.rotate(
+        job,
+        error,
+        sharedExhausted ||
+          (schedule &&
+            exhausted(schedule, usage(schedule, calendar(this.now(), schedule.timezone).date))),
+      )
+    ) {
+      this.event(job, job.waitReason);
+      delete job.retryAt;
+      if (schedule) {
+        schedule.runningJobId = job.id;
+        usage(schedule, job.quotaDate, true).outcome = 'running';
+      }
+      await this.notify('quota', job);
+      return;
+    }
     if (job.stopReason === 'pause') job.status = 'paused';
     else if (job.stopReason === 'shutdown')
       job.status = schedule
@@ -573,12 +616,18 @@ export class Operations {
         if (group && job.stopReason !== 'quota_rollover' && scope.remaining === job.limits?.bytes)
           usage(group, scope.date, true).outcome = 'bytes_limit';
       }
-      if (job.quotaScopes?.length) job.status = schedule ? 'limited' : 'waiting_quota';
+      if (
+        job.quotaScopes?.length ||
+        (job.driveCapacity !== null && job.driveCapacity !== undefined)
+      )
+        job.status = schedule ? 'limited' : 'waiting_quota';
       await this.notify('quota', job);
     } else if (!status.success && !job.stopping && kind === 'auth') {
       job.status = 'blocked';
       job.waitReason = '登录失效，请检查源和目标账号并重新授权';
-      for (const remote of [job.source.remote, job.destination.remote].filter((r) => r !== 'local'))
+      for (const remote of [job.source.remote, job.targetRemote || job.destination.remote].filter(
+        (r) => r !== 'local',
+      ))
         this.state.health[remote] = {
           status: 'auth_required',
           error,

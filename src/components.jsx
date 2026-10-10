@@ -17,6 +17,7 @@ import { api, bytes, time, providerInfo } from './api.js';
 import { ProviderIcon, providerIconInfo } from './provider-icons.jsx';
 import { TransferControls, emptyTransferOptions } from './transfer-controls.jsx';
 import { CloudForm, TransferHint } from './cloud.jsx';
+import { Login115Form, DriveGroupForm } from './connections.jsx';
 
 export function Logo({ compact = false }) {
   return (
@@ -69,7 +70,7 @@ export function Badge({ status, dryRun }) {
     limited: '已达限制',
     queued: '排队中',
     retry_wait: '等待重试',
-    waiting_quota: '等待次日额度',
+    waiting_quota: '等待额度恢复',
     blocked: '等待重新授权',
     paused: '已暂停',
   };
@@ -141,6 +142,9 @@ export function JobTable({ jobs, onStop, onDetails, compact = false }) {
                         </small>
                       )}
                       {job.waitReason && <small className="muted">{job.waitReason}</small>}
+                      {job.targetRemote && job.targetRemote !== job.destination.remote && (
+                        <small className="muted">上传账号：{job.targetRemote}</small>
+                      )}
                     </div>
                   </div>
                 </td>
@@ -384,6 +388,7 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
   const popular = [
     'openlist-115',
     'drive',
+    'drive-group',
     'openlist-guangya',
     'openlist-123',
     'webdav',
@@ -441,6 +446,17 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
       setBusy(false);
     }
   }
+  if (step === 'fields' && ['openlist-115', 'direct-115'].includes(type))
+    return (
+      <Login115Form
+        remote={remote}
+        onBack={() => setStep('provider')}
+        onClose={onClose}
+        onDone={onDone}
+      />
+    );
+  if (step === 'fields' && type === 'drive-group')
+    return <DriveGroupForm remote={remote} onClose={onClose} onDone={onDone} />;
   if (step === 'fields' && type.startsWith('openlist-'))
     return (
       <CloudForm
@@ -469,6 +485,10 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
       </div>
       {step === 'provider' ? (
         <div className="modal-body">
+          <p className="cloud-help">
+            Google Drive、OneDrive、WebDAV、S3 等可直接连接。115 可选择直接扫码、CK 或
+            OpenList；光鸭和 123 需要 OpenList，已有其他网盘服务可选择 WebDAV。
+          </p>
           <div className="search-box">
             <Search size={17} />
             <input
@@ -654,7 +674,12 @@ export function JobForm({ remotes, source: initialSource, onClose, onDone }) {
   const [source, setSource] = useState(initialSource || { remote: 'local', path: '' });
   const [destination, setDestination] = useState({
     remote:
-      remotes.find((item) => !item.pending && item.name !== initialSource?.remote)?.name || 'local',
+      remotes.find(
+        (item) =>
+          !item.pending &&
+          item.capabilities?.upload !== false &&
+          item.name !== initialSource?.remote,
+      )?.name || 'local',
     path: '',
   });
   const [dryRun, setDryRun] = useState(false);
@@ -667,6 +692,7 @@ export function JobForm({ remotes, source: initialSource, onClose, onDone }) {
       .filter((item) => !item.pending)
       .map((item) => ({
         name: item.name,
+        upload: item.capabilities?.upload !== false,
         label: `${item.accountLabel || item.name} · ${providerInfo(item.type).title}`,
       })),
   ];
@@ -685,11 +711,13 @@ export function JobForm({ remotes, source: initialSource, onClose, onDone }) {
                 setTransferOptions((previous) => ({ ...previous, selections: [] }));
             }}
           >
-            {storageOptions.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.label}
-              </option>
-            ))}
+            {storageOptions
+              .filter((item) => label === '源目录' || item.upload !== false)
+              .map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.label}
+                </option>
+              ))}
           </select>
         </label>
         <label className="field">

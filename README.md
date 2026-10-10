@@ -1,4 +1,4 @@
-# CloudReel 1.0.0 · 115 → Google Drive 影视传输助手
+# CloudReel 1.0.1 · 115 → Google Drive 影视传输助手
 
 [GitHub 仓库](https://github.com/qwer8856/cloudreel) · [Docker Hub 镜像](https://hub.docker.com/r/gongjuren8856/cloudreel)
 
@@ -10,22 +10,23 @@
 - 多来源增量：一个任务或计划扫描多个来源目录，保留来源末级目录名隔离文件；每轮重新检查目标，跳过已有文件，并共享所属计划与账号额度组的当天剩余额度。
 - 工作台：存储数量、任务状态、实时传输速率与历史任务。
 - 存储连接：读取 rclone 的存储类型和字段，创建、修改、删除、测试连接；支持常用 WebDAV、S3、SFTP、本地等后端。OAuth 后端展示 rclone 返回的远程授权步骤。
-- 国内网盘：115（Cookie / 官方授权令牌）、光鸭（短信 / 令牌）、123（账号密码 / 开发者密钥），通过配套 OpenList 在面板内完成登录和挂载。
+- 国内网盘：115 提供 OpenList、直接扫码、直接 CK 三个入口；直接连接无需 OpenList，支持目录浏览和下载互传。光鸭（短信 / 令牌）、123（账号密码 / 开发者密钥）通过 OpenList 连接。
 - 文件浏览：浏览本地或远程目录、搜索当前目录、排序、新建文件夹。
 - 传输任务：持久队列、目录与勾选文件复制、单向同步、预演、暂停 / 恢复、限流与网络错误退避重试；服务和 rclone 重启后继续未完成任务。
 - 计划任务：每日定时复制或同步，或每隔 5–1440 分钟重复检查；按每个计划设置容量、运行时长和时区，限额后次日继续，支持立即停止或完成当前文件后停止。影视模式使用复制。
 - 多账号与共享额度：同一种网盘连接多个账号，分别设置显示名与并发；同一账号多个任务可绑定共享每日额度组。
+- Google 团队盘 group：多个独立 OAuth 账号指向同一团队盘目录，按真实账号记录 24 小时上传预算，按成员顺序切换；所有账号耗尽后等待恢复。
 - 文件选择：浏览源与目标目录、勾选文件或文件夹、包含 / 排除规则、最小 / 最大大小、大文件额度检查。
 - 任务详情：影视任务保存完整逐文件清单并分页展示，支持 CSV 导出、只重试失败文件、后台大小与共同哈希校验、停止校验。
 - 运行维护：账号健康检查、Telegram / Webhook 通知、完整配置加密导出、恢复前验证与自动恢复点。
 - 运行设置：传输并发、检查并发、重试次数与全局带宽限制。
-- 面板登录：HttpOnly 会话、请求来源检查、登录限流；存储密码不会返回浏览器。
+- 面板登录：首次网页设置密码、登录后修改密码、HttpOnly 会话、请求来源检查与登录限流；存储密码不会返回浏览器。
 - 配置备份：修改配置前自动保存最近 10 份备份。
 - 存储图标：68 种 rclone 存储和新增 3 种网盘均有图标，图标随项目本地构建。
 
 ## 115 → Google Drive 影视工作流
 
-1. 在“存储连接”添加 115，使用现有 OpenList 的 Cookie 或官方授权令牌登录流程；添加 Google Drive，按 rclone OAuth 提示完成授权。本版本没有新增独立的 115 授权服务。
+1. 首次打开网页设置面板密码。在“存储连接 → 115 网盘”选择“直接扫码”或“直接 CK”即可连接，无需 OpenList；已有 OpenList 用户也可选择 OpenList 入口。添加 Google Drive，按 rclone OAuth 提示完成各账号授权；多账号团队盘可在“账号与额度”创建 Google group。
 2. 打开“影视传输”，选择 115 来源目录和 Google Drive 目标目录。可以传整个目录，或在单来源模式浏览并勾选文件 / 文件夹。
 3. 选择文件类型与整理方式。默认传输全部文件，保留原目录及文件名；需要时选择仅视频，或视频、字幕、海报与 NFO。整理只作用于目标路径，来源文件保持原样。
 4. 点击预览，检查来源、目标路径、大小和已有文件。预览显示前 200 项，统计覆盖整个扫描结果。命名整理需先预览并确认；映射到同一目标的不同来源文件会被拒绝，需先调整规则。
@@ -70,30 +71,38 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 ## Linux / Docker 部署
 
-推荐使用已构建镜像。Docker 同时提供 `linux/amd64` 与 `linux/arm64`，固定版本标签为 `gongjuren8856/cloudreel:1.0.0`，最新版标签为 `gongjuren8856/cloudreel:latest`。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker 发布目标为 `linux/amd64` 与 `linux/arm64`，本版发布标签为 `gongjuren8856/cloudreel:1.0.1`，最新版标签为 `gongjuren8856/cloudreel:latest`。本版镜像尚未发布时，请使用下方的源码构建命令。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
-先取得部署配置，进入项目目录：
+取得部署配置并准备数据目录：
 
 ```bash
 git clone https://github.com/qwer8856/cloudreel.git
 cd cloudreel
-cp .env.example .env
-chmod 600 .env
-mkdir -p data/config data/panel data/files data/openlist
+mkdir -p data/config data/panel data/files
 sudo chown -R 1000:1000 data/config data/panel data/files
-sudo chown -R 1001:1001 data/openlist
-sudo chmod 700 data/config data/panel data/openlist
+sudo chmod 700 data/config data/panel
 ```
 
-编辑 `.env`，设置至少 12 位的 `PANEL_PASSWORD` 和独立的 `OPENLIST_ADMIN_PASSWORD`，建议使用 16 位以上随机密码。需要改端口时设置 `PANEL_PORT`。
+默认 `compose.yaml` 可以直接使用：
 
-```dotenv
-PANEL_PASSWORD=替换为你自己的长随机密码
-OPENLIST_ADMIN_PASSWORD=替换为另一个独立随机密码
-PANEL_PORT=8787
-COOKIE_SECURE=false
-CLOUDREEL_IMAGE=gongjuren8856/cloudreel:1.0.0
+```yaml
+services:
+  cloudreel:
+    image: gongjuren8856/cloudreel:1.0.1
+    container_name: cloudreel
+    restart: unless-stopped
+    init: true
+    ports:
+      - '8787:8787'
+    volumes:
+      - ./data/config:/data/config
+      - ./data/panel:/data/panel
+      - ./data/files:/data/files
 ```
+
+这个模板不包含 `${变量}`、`environment`、`env_file` 或 `.env` 卷挂载，端口和宿主机目录直接在模板里改。只有本机 Node 开发才需要参考 `.env.example`。Compose 的 `.env` 插值与容器的 `env_file` 注入是不同功能，详见 [Docker 官方说明](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)。
+
+启动：
 
 ```bash
 docker compose pull
@@ -101,24 +110,48 @@ docker compose up -d
 docker compose logs -f
 ```
 
-访问 `http://服务器IP:8787`，输入面板密码。镜像内包含 rclone v1.75.1；Compose 同时启动 OpenList v4.2.6，OpenList 仅在容器网络中访问，不额外开放管理端口。首次添加国内网盘时，面板自动创建专用 WebDAV 账号。
+访问 `http://服务器IP:8787`，首次按网页提示设置至少 12 位的面板密码，建议使用 16 位以上随机密码。之后使用该密码登录，可在“运行设置”修改面板密码。镜像内包含 rclone v1.75.1，Google Drive 等 rclone 原生存储可直接在网页添加。
 
-需要跟随最新版时，将 `.env` 中的 `CLOUDREEL_IMAGE` 改为 `gongjuren8856/cloudreel:latest`，再运行 `docker compose pull && docker compose up -d`。需要自行构建源码时运行 `docker compose up -d --build cloudreel`。升级时保留 `.env` 和全部 `data/`；两个密码要保持与原配置一致。
+需要改端口时，直接把 `8787:8787` 左侧改成所需端口，例如 `8888:8787`。跟随最新版时，直接将 `image` 改为 `gongjuren8856/cloudreel:latest`，再运行 `docker compose pull && docker compose up -d`。
 
-| 宿主机目录      | 容器目录             | 内容                                          |
-| --------------- | -------------------- | --------------------------------------------- |
-| `data/config`   | `/data/config`       | `rclone.conf` 存储配置                        |
-| `data/panel`    | `/data/panel`        | 设置、任务历史、`backups/` 配置备份           |
-| `data/files`    | `/data/files`        | 面板中的本地文件根目录                        |
-| `data/openlist` | `/opt/openlist/data` | OpenList 数据库、网盘凭据、刷新令牌和挂载信息 |
+115 直接扫码 / CK 无需额外服务。使用光鸭、123 或 115 的 OpenList 模式时，另外准备 OpenList 服务，在网页填写服务地址和管理员授权。默认 Compose 不启动 OpenList，也不要求设置其账号密码。
 
-已有配置可以在启动前放入 `data/config/rclone.conf`，再执行 `sudo chown 1000:1000 data/config/rclone.conf && chmod 600 data/config/rclone.conf`。请使用未加密的 rclone 配置文件。配置中的密码混淆不等同于加密，配置与备份目录应一并保护。
+| 宿主机目录    | 容器目录       | 内容                             |
+| ------------- | -------------- | -------------------------------- |
+| `data/config` | `/data/config` | `rclone.conf` 存储配置           |
+| `data/panel`  | `/data/panel`  | 面板密码设置、任务历史和配置备份 |
+| `data/files`  | `/data/files`  | 面板中的本地文件根目录           |
+
+已有配置可以在启动前放入 `data/config/rclone.conf`，再执行 `sudo chown 1000:1000 data/config/rclone.conf && sudo chmod 600 data/config/rclone.conf`。请使用未加密的 rclone 配置文件。配置中的密码混淆不等同于加密，配置与备份目录应一并保护。
 
 希望管理其他本地目录时，修改 `compose.yaml` 中 `./data/files:/data/files` 的左侧，例如 `/mnt/storage:/data/files`。容器使用 UID/GID 1000 运行，映射目录须对该用户可读写。面板中的本地路径均相对于该根目录。
 
+### 可选 OpenList 接入
+
+光鸭、123 和 115 的 OpenList 模式需要 OpenList 提供对应驱动与 WebDAV。115 的直接扫码 / CK 入口不依赖它。已有服务可直接复用；没有实例时，按 [OpenList 官方 Docker 部署说明](https://doc.oplist.org/guide/installation/docker) 单独部署并完成管理员初始化。服务密码或令牌填写在 CloudReel 网页的“运行设置 → OpenList 网盘服务”，不需要写入 CloudReel Compose。
+
+OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内网IP:5244`；容器内的 `127.0.0.1` 指向 CloudReel 自身。使用 `host.docker.internal` 时，Linux 通常需自行添加 host-gateway 映射。确认服务连通后，CloudReel 会为本面板创建专用 WebDAV 账号。未配置 OpenList 时仍能使用 Google Drive、S3、普通 WebDAV 等存储。
+
+### 升级与自行构建
+
+升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
+
+旧 Compose 自带 OpenList 时，已有的 115、光鸭、123 连接仍需要它。切换模板前需保留或独立部署该服务及原数据目录；不要用 `--remove-orphans` 清理仍在使用的 OpenList。独立部署后，在网页更新地址和授权。已有国内网盘连接时需先停止相关任务、停用计划；更换服务地址还需先导出备份并移除连接，按“备份、恢复与迁移”恢复到目标服务。
+
+要使用本地尚未发布的修改，准备上述数据目录和权限后执行：
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+docker compose -f compose.yaml -f compose.build.yaml logs -f
+```
+
+`compose.build.yaml` 仅覆盖镜像为 `cloudreel:local` 并添加源码构建，沿用相同端口和数据目录，不需要 `.env`。之后继续使用这两个 `-f` 参数管理本地构建的容器。默认部署模板使用发布镜像。
+
+忘记面板密码时，先停止 CloudReel，备份并移走 `data/panel/auth.json`，再启动并通过网页重新设密。若仍在沿用旧部署的 `PANEL_PASSWORD`，需先移除该变量，避免再次导入旧密码。保留 `state.json` 和 `rclone.conf`，账号、任务与计划即可保留。
+
 ## HTTPS 反向代理
 
-将端口映射改成 `127.0.0.1:${PANEL_PORT:-8787}:8787`，在 `.env` 中设置 `COOKIE_SECURE=true`。Nginx 示例：
+将 Compose 的端口映射改成固定值 `127.0.0.1:8787:8787`，通过 Nginx 配置 HTTPS 证书后访问你的域名。Nginx 示例：
 
 ```nginx
 location / {
@@ -129,7 +162,7 @@ location / {
 }
 ```
 
-通过 Nginx 配置 HTTPS 证书后访问你的域名。面板默认部署在域名根路径。改动 `.env` 后执行：
+面板默认部署在域名根路径。HTTPS 由反向代理转发时，按示例传递 `X-Forwarded-Proto`，面板会为 HTTPS 登录设置 Secure 会话 Cookie，不需要另设环境变量。改动 Compose 端口后执行：
 
 ```bash
 docker compose up -d --force-recreate
@@ -154,7 +187,7 @@ npm run build
 npm start
 ```
 
-默认访问 `http://127.0.0.1:8787`。只在本机监听时可以不设密码；非本机监听强制要求至少 12 位密码。后端自行启动 rclone RC，使用随机凭据绑定回环地址，不需要另外启动或开放 RC 端口。
+默认访问 `http://127.0.0.1:8787`。本机开发的回环监听保留免登录模式，可在“运行设置”设置密码启用登录保护；对外监听时，首次通过网页设置面板密码。`.env.example` 仅提供直接 Node / 本机开发的监听与路径参数，不用于 Docker 部署。后端自行启动 rclone RC，使用随机凭据绑定回环地址，不需要另外启动或开放 RC 端口。
 
 Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .env`。
 
@@ -191,7 +224,25 @@ Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .e
 
 当前镜像使用官方 rclone v1.75.1：
 
-115、光鸭、123 已在连接向导中提供独立入口，按下节说明直接登录，由 OpenList 提供 WebDAV。
+115、光鸭、123 在连接向导中提供入口。光鸭、123 及 115 的 OpenList 模式先在网页接入 OpenList；115 直接模式按下节登录即可。
+
+### 115 直接扫码 / CK
+
+在“存储连接 → 添加 → 115 网盘”选择三个入口之一：
+
+| 入口     | 配置与用途                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------- |
+| 直接扫码 | 打开后自动生成二维码；填连接名称和根目录 ID，选择网页 / Android / iOS / 电视设备，用 115 App 扫码并确认后保存 |
+| 直接 CK  | 粘贴自己账号的 Cookie，至少含 `UID`、`CID`、`SEID`，可包含 `KID`；保存前会检查指定目录是否可读                |
+| OpenList | 复用现有 OpenList 及其 115 驱动，可继续使用 Cookie / 官方令牌登录                                             |
+
+根目录 ID 默认 `0`，也可以填写官网目录 URL 的 `cid`。二维码有效期最多三分钟，刷新或关闭表单会撤销本地会话；同类设备的扫码登录可能退出该设备上的旧登录。Cookie 在服务端换取和保存，不回显给网页。已建的直接连接可以重新扫码或更新 CK；迁移已有 OpenList 连接时请新建直接连接并修改任务的来源。
+
+二维码图片由面板根据 115 返回的扫码内容在本地生成，不依赖 115 的独立图片接口。服务器仍须能访问 115 的登录接口；生成或图片加载失败时，网页会显示错误，可点击生成按钮重试。切换登录设备会重新生成二维码；编辑已有连接时保留现有登录，点击生成按钮才开始重新扫码。
+
+直接模式实现目录浏览、递归扫描和文件流读取，支持“115 → 本地 / Google Drive / Google group”等复制与影视任务，暂不支持向 115 上传或创建目录。内置读取桥只监听容器回环地址，无需增加端口、服务或凭据环境变量。单目录最多 100000 项，同名项目或不能映射的名称会提示在官网调整。接口依赖 115 Cookie 协议；风控、设备验证或登录失效时，在 115 官方客户端完成验证后重新登录。协议实现来源及 MIT 许可见 [第三方声明](server/THIRD_PARTY_NOTICES.md)。
+
+`data/panel/state.json` 保存直接 115 的 Cookie，须与 `data/config` 一起保管。完整加密备份包含直接连接、Google group 和用量记录。
 
 | 存储                                 | 面板接入方式                                                                                  |
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |
@@ -206,7 +257,7 @@ Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .e
 
 ## 115、光鸭、123 登录与网盘互传
 
-在“存储连接 → 新建存储”选择对应网盘；连接完成后，在“传输任务”或“计划任务”中选择两个网盘作为源和目标即可。复制保留目标其他文件；同步会删除目标多余文件。
+先在“运行设置 → OpenList 网盘服务”接入已有服务，再在“存储连接 → 新建存储”选择对应网盘；连接完成后，在“传输任务”或“计划任务”中选择两个网盘作为源和目标即可。复制保留目标其他文件；同步会删除目标多余文件。
 
 | 网盘 | 登录选项   | 所需内容                                                                                                                      |
 | ---- | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -227,15 +278,30 @@ Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .e
 
 已有网盘连接时不能直接更换 OpenList 地址；修改授权前需停止相关任务并停用相关计划。被计划引用的连接不能删除。删除连接会移除 rclone 配置和 OpenList 挂载，保留网盘文件。OpenList 必须支持所选驱动，建议使用本项目已验证的 v4.2.6。
 
-`OPENLIST_ADMIN_PASSWORD` 只在 OpenList 首次初始化时设置管理员密码。已有数据库不会随环境变量自动更改密码；修改后需通过 OpenList 管理功能同步密码，再在面板服务设置中更新授权。
+OpenList 管理员密码由其自身的初始化与管理功能维护。修改该服务的密码或令牌后，在 CloudReel 网页更新授权即可，默认 Compose 无需改动。
 
-备份时同时保存 `data/config`、`data/panel` 和 `data/openlist`。`state.json` 包含管理员密码的登录哈希或 API Token、专用 WebDAV 凭据；OpenList 数据库包含网盘登录资料。这些数据和配置备份都应限制访问。单独恢复 `rclone.conf` 无法恢复网盘授权。
+备份时保存 `data/config`、`data/panel`，并单独备份所接入 OpenList 的数据目录。CloudReel 的 `data/panel/auth.json` 保存面板密码的派生哈希，`state.json` 包含 OpenList 管理员登录哈希或 API Token、专用 WebDAV 凭据；OpenList 数据库包含网盘登录资料。这些数据和配置备份都应限制访问。单独恢复 `rclone.conf` 无法恢复网盘授权。
 
 驱动说明：[115 Cookie](https://doc.oplist.org/guide/drivers/115)、[115 Open](https://doc.oplist.org/guide/drivers/115_open)、[光鸭](https://doc.oplist.org/guide/drivers/guangyapan)、[123](https://doc.oplist.org/guide/drivers/123)、[123 Open](https://doc.oplist.org/guide/drivers/123_open)。
 
 ## 多账号、队列与共享额度
 
-同一网盘可多次添加连接，分别填写各账号的 Cookie、令牌或账号密码；例如 `115-main`、`115-archive`、`123-family`。每个连接具有独立的 rclone 名称和 OpenList 挂载，不会覆盖其他账号。账号显示名、同时运行任务数、健康检查目录在“账号与额度”设置。删除连接不会删除网盘文件，被待执行任务或计划引用的连接需先解除引用。
+同一网盘可多次添加连接，分别填写各账号的 Cookie、令牌或账号密码；例如 `115-main`、`115-archive`、`123-family`。每个连接独立保存登录；OpenList 模式还有独立挂载。账号显示名、同时运行任务数、健康检查目录在“账号与额度”设置。删除连接不会删除网盘文件，被待执行任务或计划引用的连接需先解除引用。
+
+### Google 团队盘 group
+
+1. 添加三个 Google Drive 连接，例如 `google-a`、`google-b`、`google-c`，分别完成各自账号的 OAuth 授权。三个账号都须是目标团队盘的成员，且能向目标目录添加文件。
+2. 三个连接选择相同的 `team_drive`；若填写 `root_folder_id`，也须一致。不填时使用团队盘根目录。group 不把不同团队盘合并为一个目录。
+3. 打开“账号与额度 → 新建 Google group”，选择成员、设置各账号的 24 小时上传预算和使用顺序。默认每账号 **700 GB（十进制）**，上限 750 GB。保存时会读取 Google 的账号身份和目标目录上传权限，重复授权同一账号会被拒绝。
+4. 在影视传输、复制任务或计划的目标中选择 group 名称，目标路径仍相对于那个团队盘根目录。账号预算耗尽或出现明确上传额度错误时，下次执行改用下一个账号，重新检查并跳过已完成文件。全部成员耗尽时等待额度恢复。group 目标仅支持复制。
+
+[Google 的 750 GB 限制](https://developers.google.com/workspace/drive/api/guides/limits) 按用户计算，覆盖个人盘和全部团队盘的上传及复制。不同真实账号具有各自限额；同一账号加入多个盘或重复授权不增加额度。group 记录本面板通过已入组成员连接及 group 的上传；下载和预演不计入。其他客户端、未入组连接的使用量不可见，Google 没有提供准确剩余上传预算接口，因此显示的是本面板的估算用量。
+
+用量按最近 24 小时保守累计，不在午夜清零；Google 明确拒绝继续上传时，该账号从检测时间起冷却至少 24 小时。普通权限错误、API 请求限流、团队盘文件数或存储空间不足不会当作每日上传额度切换。计划设置的总容量、运行时长和普通共享额度继续生效，切换账号不会增加计划总预算。为了避免并发预留同一额度，group 与其成员写入同一团队盘根目录的任务依次执行。
+
+重启及加密备份恢复保留 group 和已记录用量。修改 / 删除成员连接前须先从 group 移除；修改 group 前暂停相关运行任务并停用引用它的计划。大文件中途切换后的字节级续传取决于后端，仍可能重传未完成文件。
+
+group 使用账号硬预算，达到限制立即停止，计划的“完成当前文件后停止”不会放宽账号预算。单个文件大于所有成员预算时，执行前会提示调整，避免每 24 小时反复重传；请给账号设置足以完整传输最大文件的预算。
 
 在“账号与额度”新建额度组，设置每日容量、时区和停止方式，再将相关连接绑定到该组。同一账号的多个连接应绑定同组；不同账号可使用不同组。面板不会根据 Cookie 自动识别真实账号。一个任务同时使用两个组时，受剩余额度较小的组限制，传输字节分别记入两个组；同组源和目标只计一次。组内任务串行运行，避免同时占用同一份剩余额度。额度是 rclone 传输字节，不是网盘账单或服务器上下行流量总和。
 
@@ -265,17 +331,15 @@ Windows 开发时将 `cp .env.example .env` 替换成 `Copy-Item .env.example .e
 
 在“通知与备份”配置 Telegram Bot Token / Chat ID 或 Webhook，选择完成、失败、额度和授权失效事件，再保存并启用。通知包含任务名称、结果和传输字节数；Token 与 Webhook 地址不会回填，留空保留。通知失败自动退避重试，最多 5 次，可查询发送结果。默认关闭通知，未使用真实 Telegram 账号验证。
 
-完整备份包含 rclone 配置、任务 / 计划 / 额度用量、队列设置、通知设置、本面板管理的 OpenList 网盘挂载与最新授权，以及专用 WebDAV 账号信息。使用至少 12 位的独立备份密码，以 scrypt 派生密钥和 AES-256-GCM 加密；请自行保管密码。备份不包含文件内容、外部 OpenList 的其他挂载和全局数据库设置；整实例备份仍应保存原有 `data/openlist` 数据库目录。
+完整备份包含 rclone 配置、任务 / 计划 / 额度用量、队列设置、通知设置、本面板管理的 OpenList 网盘挂载与最新授权，以及专用 WebDAV 账号信息。使用至少 12 位的独立备份密码，以 scrypt 派生密钥和 AES-256-GCM 加密；请自行保管密码。备份不包含文件内容、外部 OpenList 的其他挂载和全局数据库设置；整实例备份仍应另外保存 OpenList 自身的数据目录。
+
+面板登录凭据独立保存在 `data/panel/auth.json`，不包含在网页导出的完整配置备份中；恢复配置不会替换当前面板密码。整机迁移保留该数据目录即可保留登录设置。
 
 导出或恢复前暂停所有待执行任务、停用计划并等待校验结束。选择备份文件并输入密码，先点击“验证备份文件”确认连接与记录数量，再确认恢复。恢复前自动生成加密恢复点，保存在 `data/panel/full-backups`，使用本次输入的备份密码；失败尝试回滚。恢复后任务、计划与通知均保持暂停，确认账号与目录后自行恢复。
 
 迁移网盘配置时，先将新面板连接到目标 OpenList 服务，再恢复备份；面板只恢复它拥有的挂载范围和专用账号。保留当前目标服务的管理员登录设置。已有同名挂载或专用账号的目录 / 权限与备份不一致时会拒绝恢复，需要先处理冲突。恢复不会删除网盘文件。
 
-升级时保留 `.env` 和全部 `data/`，替换项目源文件后执行：
-
-```bash
-docker compose up -d --build
-```
+升级部署按“升级与自行构建”操作，网页保存的账号与任务配置均保留在数据目录中。
 
 ## 测试
 
@@ -298,9 +362,9 @@ RCLONE_BIN=/你的/rclone/绝对路径 node --import ./tests/setup.mjs --test te
 
 CloudReel 首版为 `1.0.0`。补丁位固定在 `0–9`：`1.0.0 → … → 1.0.9 → 1.1.0 → … → 1.1.9 → 1.2.0`，例如 `1.2.9` 的下一版为 `1.3.0`。次版本正常递增，不自动增加主版本。
 
-`npm run version:next` 只显示下一版本；`npm run version:bump` 更新 `package.json` 与锁文件。页面版本自动读取包版本。准备下一次发布时，同步更新 Compose 默认镜像、`.env.example`、Dockerfile 默认版本和本文版本说明，测试后提交并创建 `v版本号` Git 标签。
+`npm run version:next` 只显示下一版本；`npm run version:bump` 更新 `package.json` 与锁文件。页面版本自动读取包版本。准备下一次发布时，同步更新 Compose 默认镜像、Dockerfile 默认版本和本文版本说明，测试后提交并创建 `v版本号` Git 标签。
 
-每次发布同时推送两个 Docker 标签：固定的版本标签和 `latest`。已发布版本标签保持原内容，`latest` 指向最新通过检查的版本。GitHub Actions 自动检查代码、测试、前端构建与部署配置；Docker 发布使用已登录的 Docker Hub 账号，仓库中不存放令牌或网盘配置。
+每次发布同时推送两个 Docker 标签：固定的版本标签和 `latest`。已发布版本标签保持原内容，`latest` 指向最新通过检查的版本。GitHub Actions 负责代码、测试、前端构建与部署配置检查，不会自动推送 Docker 镜像。Docker 发布使用已登录的 Docker Hub 账号；发布完成需确认公开仓库中两个标签均存在，并验证匿名拉取。仓库中不存放令牌或网盘配置。
 
 本项目由现有 Rclone Studio 面板改造而来。旧备份格式和挂载标识继续兼容；产品名称、通知文案与部署名称统一为 CloudReel。
 

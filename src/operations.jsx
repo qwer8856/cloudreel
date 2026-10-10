@@ -3,6 +3,7 @@ import { Plus, Users, RefreshCw, Pause, Play, Download, ShieldCheck } from 'luci
 import { api, bytes, time, providerInfo } from './api.js';
 import { Badge, Dialog, JobTable, ProviderBadge } from './components.jsx';
 import './operations.css';
+import { DriveGroupSummary } from './connections.jsx';
 
 const pending = ['running', 'queued', 'retry_wait', 'waiting_quota', 'blocked'];
 function NumberField({ label, value, onChange, min = 0, max = 86400 }) {
@@ -33,7 +34,7 @@ export function AccountsPage({ remotes, openRemote, notify, refresh }) {
   );
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, remotes]);
   const done = async () => {
     setEditing(null);
     await load();
@@ -58,6 +59,49 @@ export function AccountsPage({ remotes, openRemote, notify, refresh }) {
       {error && <p className="form-error">{error}</p>}
       {data && (
         <>
+          <section className="panel ops-panel">
+            <div className="ops-toolbar">
+              <h3>Google 团队盘 group</h3>
+              <button className="button secondary" onClick={() => openRemote(null, 'drive-group')}>
+                <Plus size={15} />
+                新建 Google group
+              </button>
+            </div>
+            {!remotes.some((remote) => remote.type === 'drive-group') && (
+              <p className="muted">
+                将指向同一个团队盘的独立账号组成一个连接，按各自 24 小时预算切换上传账号。
+              </p>
+            )}
+            {remotes
+              .filter((remote) => remote.type === 'drive-group')
+              .map((remote) => (
+                <div key={remote.name} className="drive-group-card">
+                  <div className="ops-toolbar">
+                    <strong>{remote.name}</strong>
+                    <button className="text-button" onClick={() => openRemote(remote)}>
+                      编辑
+                    </button>
+                    <button
+                      className="text-button danger"
+                      onClick={async () => {
+                        try {
+                          await api(`/remotes/${encodeURIComponent(remote.name)}`, {
+                            method: 'DELETE',
+                            body: {},
+                          });
+                          refresh();
+                        } catch (error) {
+                          notify(error.message, 'error');
+                        }
+                      }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <DriveGroupSummary group={remote.group} />
+                </div>
+              ))}
+          </section>
           <section className="panel ops-panel">
             <div className="ops-toolbar">
               <h3>共享每日额度</h3>

@@ -76,7 +76,10 @@ test(
           (await call('/remotes')).data.find((r) => r.name === 'source').type,
           'openlist-115',
         );
-        assert.equal((await call('/providers')).data.filter((p) => p.managed).length, 3);
+        assert.deepEqual(
+          (await call('/providers')).data.filter((p) => p.managed).map((p) => p.name),
+          ['openlist-115', 'openlist-guangya', 'openlist-123', 'drive-group'],
+        );
         assert.equal((await call('/remotes/source', 'PUT', { parameters: {} })).status, 400);
       });
       await t.test('未完成登录的网盘不可用作任务端点，重复名称被拒绝', async () => {

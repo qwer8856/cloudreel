@@ -17,7 +17,8 @@ test(
     const root = path.join(fixture, 'files');
     await mkdir(root, { recursive: true });
     let panel, server, base;
-    let clock = Date.now();
+    // Advancing six minutes must stay on the same quota day, even when tests run near midnight.
+    let clock = new Date('2026-10-10T12:00:00+08:00').getTime();
     const options = {
       HOST: '127.0.0.1',
       PANEL_PASSWORD: '',

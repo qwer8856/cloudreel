@@ -181,7 +181,16 @@ function sourcePathsFromText(text) {
 
 export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob, onSchedules }) {
   const connected = remotes.filter((remote) => !remote.pending);
-  const findPreferred = (type) => connected.find((remote) => remote.type === type)?.name || '';
+  const preferredTypes = (type) =>
+    type === 'drive'
+      ? ['drive-group', 'drive']
+      : type === 'openlist-115'
+        ? ['direct-115', 'openlist-115']
+        : [type];
+  const findPreferred = (type) =>
+    preferredTypes(type)
+      .map((value) => connected.find((remote) => remote.type === value))
+      .find(Boolean)?.name || '';
   const [source, setSource] = useState({ remote: findPreferred('openlist-115'), path: '' });
   const [destination, setDestination] = useState({ remote: findPreferred('drive'), path: '' });
   const [name, setName] = useState('');
@@ -298,6 +307,7 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
           >
             <option value="">请选择已连接的网盘</option>
             {[...connected]
+              .filter((remote) => side === 'source' || remote.capabilities?.upload !== false)
               .sort(
                 (a, b) =>
                   Number(b.type === (side === 'source' ? 'openlist-115' : 'drive')) -
@@ -355,8 +365,8 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
           保留 115 原文件
         </span>
       </section>
-      {(!connected.some((remote) => remote.type === 'openlist-115') ||
-        !connected.some((remote) => remote.type === 'drive')) && (
+      {(!connected.some((remote) => ['direct-115', 'openlist-115'].includes(remote.type)) ||
+        !connected.some((remote) => ['drive-group', 'drive'].includes(remote.type))) && (
         <section className="panel ops-panel media-connect">
           <h3>先连接你的两个网盘</h3>
           <p className="muted">

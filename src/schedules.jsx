@@ -351,12 +351,15 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
     mode: schedule.mode || 'copy',
     source: schedule.source || {
       remote:
-        remotes.find((item) => !item.pending && ['openlist-115', '115'].includes(item.type))
-          ?.name || 'local',
+        remotes.find(
+          (item) => !item.pending && ['openlist-115', 'direct-115', '115'].includes(item.type),
+        )?.name || 'local',
       path: '',
     },
     destination: schedule.destination || {
-      remote: remotes.find((item) => !item.pending && item.type === 'drive')?.name || 'local',
+      remote:
+        remotes.find((item) => !item.pending && ['drive-group', 'drive'].includes(item.type))
+          ?.name || 'local',
       path: '',
     },
     scanIntervalMinutes: schedule.scanIntervalMinutes || 0,
@@ -432,6 +435,7 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
       .filter((item) => !item.pending)
       .map((item) => ({
         name: item.name,
+        upload: item.capabilities?.upload !== false,
         label: `${item.accountLabel || item.name} · ${providerInfo(item.type).title}`,
       })),
   ];
@@ -455,11 +459,13 @@ function ScheduleForm({ schedule, remotes, onClose, onDone }) {
               setAcknowledge(false);
             }}
           >
-            {storageOptions.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.label}
-              </option>
-            ))}
+            {storageOptions
+              .filter((item) => key === 'source' || item.upload !== false)
+              .map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.label}
+                </option>
+              ))}
           </select>
         </label>
         <label className="field">

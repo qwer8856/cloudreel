@@ -35,9 +35,8 @@ jobs:
       - name: Build
         run: npm run build
       - name: Check formatting
-        run: npx prettier --check src server scripts tests vite.config.mjs README.md VERIFICATION.md
+        run: npx prettier --check src server scripts tests vite.config.mjs compose.yaml compose.build.yaml .github/workflows/ci.yml README.md VERIFICATION.md
       - name: Check Compose
-        run: docker compose config --quiet
-        env:
-          PANEL_PASSWORD: synthetic-ci-check-password
-          OPENLIST_ADMIN_PASSWORD: synthetic-openlist-ci-password
+        run: |
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.build.yaml config --quiet

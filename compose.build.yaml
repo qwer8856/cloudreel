@@ -1,0 +1,5 @@
+# 使用当前源码：docker compose -f compose.yaml -f compose.build.yaml up -d --build
+services:
+  cloudreel:
+    image: cloudreel:local
+    build: .
