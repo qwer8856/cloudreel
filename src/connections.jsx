@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, time } from './api.js';
 import { Dialog, Spinner } from './components.jsx';
 import { CloudForm } from './cloud.jsx';
+import { Cd2Form } from './cd2.jsx';
 
 export function Login115Form({ remote, onBack, onClose, onDone }) {
   const [choice, setChoice] = useState(
@@ -93,6 +94,8 @@ export function Login115Form({ remote, onBack, onClose, onDone }) {
       setBusy(false);
     }
   }
+  if (choice === 'cd2')
+    return <Cd2Form onBack={() => setChoice('qr')} onClose={onClose} onDone={onDone} />;
   if (choice === 'openlist')
     return (
       <CloudForm
@@ -107,7 +110,7 @@ export function Login115Form({ remote, onBack, onClose, onDone }) {
     <Dialog
       wide
       title={remote ? '编辑 115 直接连接' : '连接 115 网盘'}
-      subtitle="选择 OpenList、直接扫码或直接 CK 登录。"
+      subtitle="选择直接登录、OpenList，或读取 CD2 中已连接的 115。"
       onClose={busy ? () => {} : onClose}
     >
       <form onSubmit={submit}>
@@ -149,6 +152,19 @@ export function Login115Form({ remote, onBack, onClose, onDone }) {
             >
               直接 CK
             </button>
+            {!remote && (
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() => {
+                  setQr(null);
+                  setChoice('cd2');
+                }}
+              >
+                CD2 WebDAV
+              </button>
+            )}
           </div>
           <p className="ops-info">
             直接扫码和 CK 无需 OpenList，支持浏览及从 115 复制文件到其他存储；暂不支持向 115

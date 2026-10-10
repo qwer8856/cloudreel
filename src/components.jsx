@@ -18,6 +18,7 @@ import { ProviderIcon, providerIconInfo } from './provider-icons.jsx';
 import { TransferControls, emptyTransferOptions } from './transfer-controls.jsx';
 import { CloudForm, TransferHint } from './cloud.jsx';
 import { Login115Form, DriveGroupForm } from './connections.jsx';
+import { Cd2Form } from './cd2.jsx';
 
 export function Logo({ compact = false }) {
   return (
@@ -389,6 +390,7 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
   const provider = providers.find((item) => item.name === type);
   const popular = [
     'openlist-115',
+    'cd2-webdav',
     'drive',
     'drive-group',
     'openlist-guangya',
@@ -459,6 +461,15 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
     );
   if (step === 'fields' && type === 'drive-group')
     return <DriveGroupForm remote={remote} onClose={onClose} onDone={onDone} />;
+  if (step === 'fields' && type === 'cd2-webdav')
+    return (
+      <Cd2Form
+        remote={remote}
+        onBack={remote ? undefined : () => setStep('provider')}
+        onClose={onClose}
+        onDone={onDone}
+      />
+    );
   if (step === 'fields' && type.startsWith('openlist-'))
     return (
       <CloudForm
@@ -489,7 +500,8 @@ export function RemoteForm({ providers, remote, initialType, onDone, onClose }) 
         <div className="modal-body">
           <p className="cloud-help">
             Google Drive、OneDrive、WebDAV、S3 等可直接连接。115 可选择直接扫码、CK 或
-            OpenList；光鸭和 123 需要 OpenList，已有其他网盘服务可选择 WebDAV。
+            OpenList；也可通过 CD2 WebDAV 读取已在 CD2 登录的 115。光鸭和 123 需要
+            OpenList，已有其他网盘服务可选择 WebDAV。
           </p>
           <div className="search-box">
             <Search size={17} />

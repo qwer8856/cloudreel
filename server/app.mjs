@@ -23,6 +23,7 @@ import { mediaEnabled } from './media.mjs';
 import { openAuthentication } from './auth.mjs';
 import { Direct115 } from './direct115.mjs';
 import { DriveGroups } from './drive-groups.mjs';
+import { Cd2Connector } from './cd2.mjs';
 import {
   account,
   calendar,
@@ -143,7 +144,7 @@ export async function createPanel(options = {}) {
   async function remotes() {
     const [configs, providers] = await Promise.all([dump(), engine.providers()]);
     const list = Object.entries(configs)
-      .filter(([name]) => !cloudRecord(name))
+      .filter(([name]) => !cloudRecord(name) && !cd2.record(name))
       .map(([name, config]) => ({
         ...sanitizeRemote(
           name,
@@ -157,6 +158,7 @@ export async function createPanel(options = {}) {
       ...list,
       ...Object.values(state.cloudRemotes).map((record) => cloud.remoteView(record)),
       ...Object.values(state.direct115Remotes || {}).map((record) => direct115.view(record)),
+      ...Object.values(state.cd2Remotes).map((record) => cd2.view(record, configs[record.name])),
       ...(state.driveGroups || []).map((group) => driveGroups.remoteView(group)),
     ].map((remote) => ({
       ...remote,
@@ -166,6 +168,7 @@ export async function createPanel(options = {}) {
     }));
   }
   const cloud = new OpenListConnector({ state, save, engine, backup, env });
+  const cd2 = new Cd2Connector({ state, save, engine, backup });
   const direct115 = new Direct115({ state, save, now: clock, ...options.direct115Options });
   await direct115.start();
   const driveGroups = new DriveGroups({
@@ -230,6 +233,7 @@ export async function createPanel(options = {}) {
             : undefined,
           direct: direct115.record(name),
           cloud: cloudRecord(name),
+          cd2: cd2.record(name),
           group: group ? { name, members } : undefined,
           configs: members.map((member) => {
             const config = { ...configs[member] };
@@ -320,6 +324,7 @@ export async function createPanel(options = {}) {
     const configs = await dump();
     if (!Object.hasOwn(configs, name)) throw new AppError('存储配置不存在。', 404);
     if (cloudRecord(name)) cloud.assertConfig(cloudRecord(name), configs[name]);
+    if (cd2.record(name)) cd2.assertConfig(cd2.record(name), configs[name]);
     return configs[name];
   }
   async function resolveFs(endpoint, job) {
@@ -366,6 +371,10 @@ export async function createPanel(options = {}) {
     const target = cloudRecord(input.destination?.remote);
     if (direct115.record(input.destination?.remote))
       throw new AppError('115 直接连接暂仅支持读取，请选择其他上传目标。');
+    if (cd2.record(input.destination?.remote))
+      throw new AppError(
+        'CD2 WebDAV 连接仅作为只读来源，请选择 Google Drive 或 group 等上传目标。',
+      );
     if (driveGroups.record(input.destination?.remote) && input.mode !== 'copy')
       throw new AppError('Google group 仅支持复制，请选择复制模式。');
     if (target?.capabilities?.upload === false) throw new AppError('目标网盘驱动不支持上传。');
@@ -709,6 +718,12 @@ export async function createPanel(options = {}) {
         options: [],
       })),
       {
+        name: 'cd2-webdav',
+        description: '通过 CloudDrive2 WebDAV 读取 115，传输到 Google Drive group',
+        managed: true,
+        options: [],
+      },
+      {
         name: 'drive-group',
         description: '同一 Google 团队盘的多个账号，独立计量并自动切换',
         managed: true,
@@ -729,9 +744,34 @@ export async function createPanel(options = {}) {
   app.post('/api/openlist/test', async (req, res) => res.json(await cloud.check()));
   const nameExists = async (name) =>
     cloudRecord(name) ||
+    cd2.record(name) ||
     direct115.record(name) ||
     driveGroups.record(name) ||
     Object.hasOwn(await dump(), name);
+  app.post('/api/cd2/test', async (req, res) => res.json(await cd2.test(req.body)));
+  app.post('/api/cd2/:name/test', async (req, res) =>
+    res.json(await cd2.test(req.body, req.params.name)),
+  );
+  app.post('/api/cd2', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        const name = remoteName(req.body.name);
+        if (await nameExists(name)) throw new AppError('该存储名称已存在。', 409);
+        return cd2.write(req.body);
+      }),
+    ),
+  );
+  app.put('/api/cd2/:name', async (req, res) =>
+    res.json(
+      await serialize(async () => {
+        freeRemote(req.params.name);
+        const result = await cd2.write(req.body, req.params.name);
+        delete state.health[req.params.name];
+        await save();
+        return result;
+      }),
+    ),
+  );
   app.post('/api/direct115/qr', async (req, res) =>
     res.json(await direct115.startQr(req.body.device)),
   );
@@ -857,7 +897,12 @@ export async function createPanel(options = {}) {
     res.json(
       await serialize(async () => {
         const name = req.params.name;
-        if (cloudRecord(name) || direct115.record(name) || driveGroups.record(name))
+        if (
+          cloudRecord(name) ||
+          direct115.record(name) ||
+          driveGroups.record(name) ||
+          cd2.record(name)
+        )
           throw new AppError('请使用专用登录或 group 表单修改此连接。');
         freeRemote(name);
         const config = await requireRemote(name);
@@ -925,6 +970,7 @@ export async function createPanel(options = {}) {
         await requireRemote(req.params.name);
         await backup();
         await engine.call('config/delete', { name: req.params.name });
+        delete state.cd2Remotes[req.params.name];
         delete state.pending[req.params.name];
         delete state.remotePolicies[req.params.name];
         delete state.health[req.params.name];
@@ -959,6 +1005,7 @@ export async function createPanel(options = {}) {
   });
   app.post('/api/files/mkdir', async (req, res) => {
     if (direct115.record(req.body.remote)) throw new AppError('115 直接连接暂仅支持读取。');
+    if (cd2.record(req.body.remote)) throw new AppError('CD2 WebDAV 连接仅支持读取。');
     const endpoint = await resolveFs(req.body);
     if (!cleanPath(req.body.path)) throw new AppError('请输入新建文件夹路径。');
     await engine.call('operations/mkdir', { fs: endpoint.fs, remote: '' });

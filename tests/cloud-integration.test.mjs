@@ -78,7 +78,7 @@ test(
         );
         assert.deepEqual(
           (await call('/providers')).data.filter((p) => p.managed).map((p) => p.name),
-          ['openlist-115', 'openlist-guangya', 'openlist-123', 'drive-group'],
+          ['openlist-115', 'openlist-guangya', 'openlist-123', 'cd2-webdav', 'drive-group'],
         );
         assert.equal((await call('/remotes/source', 'PUT', { parameters: {} })).status, 400);
       });

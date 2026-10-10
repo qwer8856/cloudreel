@@ -73,6 +73,12 @@ export function providerInfo(type) {
         color: 'blue',
         short: '123',
       },
+      'cd2-webdav': {
+        title: 'CD2 WebDAV',
+        subtitle: '读取 CD2 中的 115，传到 Google group',
+        color: 'blue',
+        short: 'CD2',
+      },
       webdav: {
         title: 'WebDAV',
         subtitle: '连接 Alist、Nextcloud 等存储',

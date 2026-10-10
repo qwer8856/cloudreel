@@ -16,6 +16,10 @@ test('拒绝路径穿越、Windows 盘符与控制字符', () => {
     assert.throws(() => cleanPath(value));
   assert.equal(cleanPath('/媒体//电影/'), '媒体/电影');
   assert.equal(cleanPath(''), '');
+  if (process.platform !== 'win32')
+    assert.equal(cleanPath('电影/海绵宝宝:特别篇.mkv'), '电影/海绵宝宝:特别篇.mkv');
+  assert.throws(() => cleanPath('C:secret'));
+  assert.throws(() => cleanPath('电影/C:/secret'));
 });
 test('校验远程名称和运行参数', () => {
   assert.equal(remoteName('cloud-backup_1'), 'cloud-backup_1');

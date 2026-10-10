@@ -1,4 +1,4 @@
-# CloudReel 1.0.5 · 115 → Google Drive 影视传输助手
+# CloudReel 1.0.6 · 115 → Google Drive 影视传输助手
 
 [GitHub 仓库](https://github.com/qwer8856/cloudreel) · [Docker Hub 镜像](https://hub.docker.com/r/gongjuren8856/cloudreel)
 
@@ -11,6 +11,7 @@
 - 工作台：存储数量、任务状态、实时传输速率与历史任务。
 - 存储连接：读取 rclone 的存储类型和字段，创建、修改、删除、测试连接；支持常用 WebDAV、S3、SFTP、本地等后端。OAuth 后端展示 rclone 返回的远程授权步骤。
 - 国内网盘：115 提供 OpenList、直接扫码、直接 CK 三个入口；直接连接无需 OpenList，支持目录浏览和下载互传。光鸭（短信 / 令牌）、123（账号密码 / 开发者密钥）通过 OpenList 连接。
+- CD2 来源：网页配置 CloudDrive2 WebDAV 地址、账号和目录，测试读取权限；支持 115 经 CD2 读取后上传到 Google Drive group，来源只读，账号密码无需写入 Compose。
 - 文件浏览：浏览本地或远程目录、搜索当前目录、排序、新建文件夹。
 - 传输任务：持久队列、目录与勾选文件复制、单向同步、预演、暂停 / 恢复、限流与网络错误退避重试；服务和 rclone 重启后继续未完成任务。
 - 计划任务：每日定时复制或同步，或每隔 5–1440 分钟重复检查；按每个计划设置容量、运行时长和时区，限额后次日继续，支持立即停止或完成当前文件后停止。影视模式使用复制。
@@ -85,9 +86,23 @@ Google Drive 允许同一级存在多个同名文件或文件夹。当前按名�
 
 分类和命名只依赖目录与文件名，不接入 TMDB，不识别视频内容，也不能保证不规范命名、别名、集数与附属文件一定关联正确。缺少年份或季信息会使用上述回退值，请核对预览后开始传输。
 
+## 115 → CD2 WebDAV → CloudReel → Google Drive group
+
+1. 在已有 CD2 的管理网页登录 115，并开启 WebDAV 服务，确认在 CD2 中能打开目录和读取文件。按 [CD2 官方说明](https://www.clouddrive2.com/en/features.html)，通常地址为 `http://服务器IP:19798/dav/`；可使用 CD2 登录邮箱和密码，也可使用独立 WebDAV 用户。独立用户功能是否可用取决于 CD2 版本和会员方案。
+2. 在 CloudReel 的“存储连接 → CD2 WebDAV”添加只读来源；“115 网盘”表单和影视传输页面也有 CD2 入口。填写容器能访问的 WebDAV 地址、用户名和密码，点击“测试连接”，再保存。地址不能携带账号密码、查询参数或令牌；匿名模式需先在 CD2 开启匿名访问。
+3. “CD2 来源根目录”填写 WebDAV 中的目录名称，例如 `115/电影`，使用原文字和 `/`，无需填写 115 目录 ID，也不要手动 URL 编码。留空会展示 WebDAV 用户可见的根目录，可保存后通过浏览选择 115。若该用户在 CD2 已限定到 115 根目录，留空或填写其中的 `电影` 即可。
+4. 在 CloudReel 单独添加 Google Drive 账号，每个账号独立 OAuth，指向同一团队盘及根目录；在“账号与额度”创建 Google group。CD2 来源不会作为上传目标，也不会作为 group 成员。
+5. 在“影视传输”选择 CD2 来源及 Google group 目标，浏览选择目录、后台扫描并确认传输。既有跳过规则、失败重试、停止原因、定时扫描和 group 24 小时预算继续生效；新表单会优先选择 CD2 来源和 Google group。
+
+CD2 中的 115 授权与 CloudReel 的 WebDAV 密码互相独立。编辑连接时密码留空保留原值，更换账号需重新填写；切换匿名访问会清除保存的账号密码。凭据保存在 `data/config/rclone.conf`，连接记录保存在 `data/panel/state.json`，两者一起保留、加密备份和恢复。rclone 的密码混淆可逆，数据目录仍需妥善保管。
+
+同一台服务器的两个 Docker 容器里，`127.0.0.1` 各自指向容器本身。1Panel 部署可填写宿主机 IP 与 CD2 映射端口；若两容器已加入同一 Docker 网络，也可填写 CD2 的服务名，例如 `http://clouddrive2:19798/dav/`。端口或 `/dav` 路径以 CD2 的实际设置为准。这里无需给 CloudReel 添加 FUSE、特权模式或 CD2 磁盘挂载；默认 Compose 保持端口和数据目录配置即可。
+
+数据按“115 → CD2 → CloudReel → Google”经过服务器网络。CloudReel 通过 WebDAV 流式读取并用原生 Google Drive 连接上传，无需把 Google 挂载到 CD2；CD2 的可选缓存由 CD2 设置管理。速度仍取决于 115、CD2、服务器网络和 Google，新增入口不保证消除上游等待。WebDAV 通常不提供共同哈希，传后校验会使用双方支持的共同哈希或回退到大小。Linux / Docker 支持原文冒号文件名，同时继续拒绝 Windows 盘符和路径穿越；Windows 运行时不接受冒号文件名。
+
 ## Linux / Docker 部署
 
-默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.5`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
+默认只启动 CloudReel 一个容器，镜像内已包含 rclone。Docker Hub 公开镜像已发布，支持 `linux/amd64` 与 `linux/arm64`；本版标签为 `gongjuren8856/cloudreel:1.0.6`，最新版标签为 `gongjuren8856/cloudreel:latest`。部署不需要 `.env`；面板密码、网盘账号、OpenList 接入、任务规则和通知均通过网页设置。
 
 取得部署配置并准备数据目录：
 
@@ -104,7 +119,7 @@ sudo chmod 700 data/config data/panel
 ```yaml
 services:
   cloudreel:
-    image: gongjuren8856/cloudreel:1.0.5
+    image: gongjuren8856/cloudreel:1.0.6
     container_name: cloudreel
     restart: unless-stopped
     init: true
@@ -152,12 +167,12 @@ OpenList 地址必须能从 CloudReel 容器访问，例如 `http://服务器内
 
 升级时保留原来的三个数据目录，修改 Compose 的固定镜像版本后执行 `docker compose pull && docker compose up -d`。从 1.0.0 升级也继续使用原数据目录；旧 `PANEL_PASSWORD` 在首次启动时可迁移成密码哈希，此后网页保存的密码优先。移除旧变量后，若首次提示设置面板密码，按网页完成设置。
 
-[v1.0.5 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.5) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
+[v1.0.6 发布页](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.6) 提供源码包、部署模板包和两种架构的离线镜像。首次安装可下载部署模板包，解压后准备前文的数据目录与权限。Docker Hub 拉取困难时，下载适合服务器架构的离线镜像及 `SHA256SUMS`，核对后导入：
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
-docker load -i cloudreel-1.0.5-linux-amd64.tar.gz
-# ARM64 服务器将上面的文件名换成 cloudreel-1.0.5-linux-arm64.tar.gz
+docker load -i cloudreel-1.0.6-linux-amd64.tar.gz
+# ARM64 服务器将上面的文件名换成 cloudreel-1.0.6-linux-arm64.tar.gz
 docker compose up -d --pull never
 ```
 

@@ -3100,6 +3100,13 @@ tr:last-child td {
   }
 }
 /* Native cloud connections */
+.cd2-test-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
+  font-size: 12px;
+}
 .cloud-login-modes {
   display: flex;
   flex-wrap: wrap;

@@ -551,7 +551,7 @@ function RemotePage({ remotes, status, openRemote, openDelete, browse, notify })
             }
           />
           <div className="popular-row">
-            {['openlist-115', 'openlist-guangya', 'openlist-123', 'webdav', 's3'].map((type) => (
+            {['openlist-115', 'cd2-webdav', 'drive', 'drive-group', 'webdav'].map((type) => (
               <button
                 key={type}
                 disabled={!status?.available}
@@ -626,6 +626,8 @@ function FilesPage({ remotes, location, setLocation, status, openJob, notify }) 
             : a.Name.localeCompare(b.Name, 'zh-CN')),
     );
   const parts = location.path.split('/').filter(Boolean);
+  const readOnly =
+    remotes.find((remote) => remote.name === location.remote)?.capabilities?.upload === false;
   async function makeFolder(event) {
     event.preventDefault();
     setBusy(true);
@@ -726,7 +728,8 @@ function FilesPage({ remotes, location, setLocation, status, openJob, notify }) 
           <div className="file-tools">
             <button
               className="button small-button secondary"
-              disabled={!status?.available || !!error}
+              disabled={!status?.available || !!error || readOnly}
+              title={readOnly ? '此连接仅支持读取' : undefined}
               onClick={() => {
                 setFolderName('');
                 setFolderError('');

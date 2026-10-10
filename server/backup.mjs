@@ -8,6 +8,7 @@ import { operationSettings, transferOptions } from './operations.mjs';
 import { validateSchedule } from './scheduling.mjs';
 import { cookie115 } from './direct115.mjs';
 import { validateDriveGroup } from './drive-groups.mjs';
+import { validateCd2 } from './cd2.mjs';
 
 const scrypt = promisify(derive),
   compress = promisify(gzip),
@@ -85,6 +86,10 @@ function validatePayload(payload) {
     throw new AppError('备份内容不完整。');
   validateSettings(payload.state.settings);
   operationSettings(payload.state.operations);
+  for (const [name, record] of Object.entries(payload.state.cd2Remotes || {})) {
+    if (record.name !== name) throw new AppError('CD2 WebDAV 备份无效。');
+    validateCd2(record);
+  }
   for (const [name, record] of Object.entries(payload.state.direct115Remotes || {})) {
     remoteName(name);
     if (
@@ -228,6 +233,7 @@ export class Backups {
     Object.assign(this.state, restored);
     this.state.cloudRemotes ||= {};
     this.state.direct115Remotes ||= {};
+    this.state.cd2Remotes ||= {};
     this.state.driveGroups ||= [];
     this.state.driveAccounts ||= {};
     this.direct115?.reset();

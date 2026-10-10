@@ -114,7 +114,7 @@ test('115 特殊名称映射为独立路径段，保留中文和 emoji 且不与
     assert.equal(decodeURIComponent(encodeURIComponent(alias)), alias);
   }
   // Mapping names must not relax the application-wide path traversal checks.
-  for (const value of ['../outside', './file', 'a:b', 'a\\b'])
+  for (const value of ['../outside', './file', 'C:/Windows', 'a\\b'])
     assert.throws(() => cleanPath(value));
 });
 

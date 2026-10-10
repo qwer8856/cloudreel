@@ -23,8 +23,11 @@ export function cleanPath(value = '') {
   if (typeof value !== 'string' || value.length > 2048 || /[\x00-\x1f\\]/.test(value))
     throw new AppError('目录路径格式不正确，请使用 / 分隔。');
   const parts = value.split('/').filter(Boolean);
-  if (parts.some((part) => part === '..' || part === '.' || part.includes(':')))
-    throw new AppError('目录路径不能包含 ..、. 或冒号。');
+  if (
+    parts.some((part) => part === '..' || part === '.' || /^[a-zA-Z]:/.test(part)) ||
+    (process.platform === 'win32' && parts.some((part) => part.includes(':')))
+  )
+    throw new AppError('目录路径不能包含 ..、. 或 Windows 盘符；Windows 不支持冒号文件名。');
   return parts.join('/');
 }
 

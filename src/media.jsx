@@ -187,7 +187,7 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
     type === 'drive'
       ? ['drive-group', 'drive']
       : type === 'openlist-115'
-        ? ['direct-115', 'openlist-115']
+        ? ['cd2-webdav', 'direct-115', 'openlist-115']
         : [type];
   const findPreferred = (type) =>
     preferredTypes(type)
@@ -331,8 +331,14 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
               .filter((remote) => side === 'source' || remote.capabilities?.upload !== false)
               .sort(
                 (a, b) =>
-                  Number(b.type === (side === 'source' ? 'openlist-115' : 'drive')) -
-                  Number(a.type === (side === 'source' ? 'openlist-115' : 'drive')),
+                  (preferredTypes(side === 'source' ? 'openlist-115' : 'drive').indexOf(a.type) < 0
+                    ? 100
+                    : preferredTypes(side === 'source' ? 'openlist-115' : 'drive').indexOf(
+                        a.type,
+                      )) -
+                  (preferredTypes(side === 'source' ? 'openlist-115' : 'drive').indexOf(b.type) < 0
+                    ? 100
+                    : preferredTypes(side === 'source' ? 'openlist-115' : 'drive').indexOf(b.type)),
               )
               .map((remote) => (
                 <option key={remote.name} value={remote.name}>
@@ -377,7 +383,14 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
         </span>
         <div>
           <strong>
-            115 网盘 <ArrowRight size={17} /> Google Drive
+            115 网盘{' '}
+            {sourceRemote?.type === 'cd2-webdav' && (
+              <>
+                <ArrowRight size={17} /> CD2 WebDAV
+              </>
+            )}{' '}
+            <ArrowRight size={17} />{' '}
+            {targetRemote?.type === 'drive-group' ? 'Google Drive group' : 'Google Drive'}
           </strong>
           <p>选择目录 · 检查已传文件 · 后台复制 · 失败重试</p>
         </div>
@@ -386,7 +399,9 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
           保留 115 原文件
         </span>
       </section>
-      {(!connected.some((remote) => ['direct-115', 'openlist-115'].includes(remote.type)) ||
+      {(!connected.some((remote) =>
+        ['cd2-webdav', 'direct-115', 'openlist-115'].includes(remote.type),
+      ) ||
         !connected.some((remote) => ['drive-group', 'drive'].includes(remote.type))) && (
         <section className="panel ops-panel media-connect">
           <h3>先连接你的两个网盘</h3>
@@ -394,6 +409,15 @@ export function MediaPage({ remotes, status, notify, refresh, openRemote, onJob,
             115 连接用于读取影视文件，Google Drive 连接用于保存。连接完成后即可浏览目录。
           </p>
           <div className="ops-toolbar">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={!status?.available}
+              onClick={() => openRemote(null, 'cd2-webdav')}
+            >
+              <FolderOpen size={16} />
+              连接 CD2 WebDAV
+            </button>
             <button
               type="button"
               className="button secondary"

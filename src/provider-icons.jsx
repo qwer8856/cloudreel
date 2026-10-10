@@ -72,6 +72,7 @@ const asset = (name, color) => ({ asset: name, color });
 export const providerIcons = {
   'openlist-115': { mark: '115', color: '#3585d3' },
   'direct-115': { mark: '115', color: '#3585d3' },
+  'cd2-webdav': functional(CloudCog, '#3585d3'),
   'drive-group': functional(Users, '#428c79'),
   'openlist-123': { mark: '123', color: '#496ccf' },
   'openlist-guangya': functional(Sun, '#d49a32'),
