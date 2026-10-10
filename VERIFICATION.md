@@ -5,6 +5,9 @@
 - 修复目录中任意特殊名称导致整个目录 `ListJSON` / 502 失败的问题。直接扫码与 CK 使用同一个读取桥；冒号、斜杠、反斜杠、控制字符及不合法 XML 字符转换为稳定的单段名称，字面百分号也转义，避免 `a:b` 与 `a%3Ab` 指向同一文件。普通中文与 emoji 保持不变，115 原文件不改名。
 - 网页和 README 说明浏览、任务路径及复制结果使用显示名称。缺失或错误的名称字段仍返回上游响应错误，不静默跳过文件；全局路径穿越检查、目录漂移检查与同名拒绝保留。
 - 8 项直接 115 单元测试通过。新回归测试经实际 rclone 1.75.1 在 `电影/动画电影` 目录中浏览并递归复制 11 个文件，核对每个文件独立内容；覆盖冒号、反斜杠、换行、百分号、点名称、中文 / XML / emoji、嵌套特殊目录及名称中的斜杠。原 Google group 切换、持久恢复与加密备份集成测试通过。
+- AMD64 / ARM64 实际生产镜像分别运行完整 151 项测试：150 通过、1 项独立 OpenList 集成测试跳过。UID 1000、rclone 1.75.1、生产网页与本地二维码 PNG 验证通过；构建、格式及两份 Compose 校验通过。源码 [main CI](https://github.com/qwer8856/cloudreel/actions/runs/38075173112) 与 [标签 CI](https://github.com/qwer8856/cloudreel/actions/runs/38075273291) 均成功。
+- 源码提交 `a797743c6483ac31490eeb40fcd7d6bc7b2f2458` 与 `v1.0.2` 已推送到 GitHub；[GitHub Release v1.0.2](https://github.com/qwer8856/cloudreel/releases/tag/v1.0.2) 已公开。Docker Hub `1.0.2` 与 `latest` 同为 `sha256:3903d0264679a5eb4babdb156799b0db2dabc4a7d640281979b786da0b14663e`，都包含 AMD64 / ARM64；匿名请求 HTTP 200。
+- 使用 `skopeo --src-no-creds --all --preserve-digests` 实际匿名下载两个架构的全部镜像。核对镜像索引、两份平台清单、22 个 blob 的 SHA256、层大小、平台配置的版本与源码提交，全部匹配。离线镜像包也核对架构、版本、标签与本地 SHA256。
 - 本轮使用模拟 115 元数据与下载流验证读取桥，不代表已访问用户的真实 115 账号或服务器目录。
 
 ## CloudReel 1.0.1 镜像发布与打包（2026-10-11）
